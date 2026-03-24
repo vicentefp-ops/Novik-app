@@ -88,9 +88,16 @@ export default function AdminUsers() {
 
       // Country Data (filtered by period)
       const countryCounts: Record<string, number> = {};
+      const normalizeCountry = (country: string) => {
+        const normalized = country.trim();
+        if (normalized.toLowerCase() === 'spain' || normalized.toLowerCase() === 'españa') return 'España';
+        return normalized;
+      };
+
       users.filter(u => u.createdAt?.toDate && isAfter(u.createdAt.toDate(), periodStart) && !isAfter(u.createdAt.toDate(), periodEnd)).forEach(u => {
         if (u.country) {
-          countryCounts[u.country] = (countryCounts[u.country] || 0) + 1;
+          const country = normalizeCountry(u.country);
+          countryCounts[country] = (countryCounts[country] || 0) + 1;
         }
       });
       

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { Stethoscope, ShieldCheck, Loader2, ChevronDown, Search } from 'lucide-react';
@@ -452,16 +453,16 @@ export default function Onboarding() {
                     {language === 'en' ? (
                       <>
                         By checking this box, I confirm that I have read and accept the{' '}
-                        <a href="/privacy-policy" target="_blank" rel="noopener noreferrer" className="text-olive-600 hover:underline">Privacy Policy</a>,{' '}
-                        <a href="/terms-of-use" target="_blank" rel="noopener noreferrer" className="text-olive-600 hover:underline">Terms of Use</a>, and{' '}
-                        <a href="/legal-notice" target="_blank" rel="noopener noreferrer" className="text-olive-600 hover:underline">Legal Notice</a>.
+                        <Link to="/privacy-policy" target="_blank" rel="noopener noreferrer" className="text-olive-600 hover:underline">Privacy Policy</Link>,{' '}
+                        <Link to="/terms-of-use" target="_blank" rel="noopener noreferrer" className="text-olive-600 hover:underline">Terms of Use</Link>, and{' '}
+                        <Link to="/legal-notice" target="_blank" rel="noopener noreferrer" className="text-olive-600 hover:underline">Legal Notice</Link>.
                       </>
                     ) : (
                       <>
                         Al marcar esta casilla, confirmo que he leído y acepto la{' '}
-                        <a href="/privacy-policy" target="_blank" rel="noopener noreferrer" className="text-olive-600 hover:underline">Política de Privacidad</a>, los{' '}
-                        <a href="/terms-of-use" target="_blank" rel="noopener noreferrer" className="text-olive-600 hover:underline">Términos de Uso</a> y el{' '}
-                        <a href="/legal-notice" target="_blank" rel="noopener noreferrer" className="text-olive-600 hover:underline">Aviso Legal</a>.
+                        <Link to="/privacy-policy" target="_blank" rel="noopener noreferrer" className="text-olive-600 hover:underline">Política de Privacidad</Link>, los{' '}
+                        <Link to="/terms-of-use" target="_blank" rel="noopener noreferrer" className="text-olive-600 hover:underline">Términos de Uso</Link> y el{' '}
+                        <Link to="/legal-notice" target="_blank" rel="noopener noreferrer" className="text-olive-600 hover:underline">Aviso Legal</Link>.
                       </>
                     )}
                   </p>

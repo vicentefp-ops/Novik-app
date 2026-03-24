@@ -271,19 +271,46 @@ function processCitationsAndReferences(text: string, language: string): string {
   // 4. Rebuild references list with new indices and in the order they appear
   const refLines = refsText.split('\n');
   const refContentMap = new Map<number, string>();
+  let currentRefIdx = -1;
   refLines.forEach(line => {
-    const m = line.match(/^(\d+)\.\s(.*)/);
+    const m = line.match(/^\[?(\d+)\]?[\.\)\-]?\s+(.*)/);
     if (m) {
-      refContentMap.set(parseInt(m[1]), m[2]);
+      currentRefIdx = parseInt(m[1]);
+      refContentMap.set(currentRefIdx, m[2]);
+    } else if (currentRefIdx !== -1 && line.trim() !== '') {
+      refContentMap.set(currentRefIdx, refContentMap.get(currentRefIdx) + ' ' + line.trim());
     }
   });
 
   const newRefs: string[] = [];
   citationsInOrder.forEach((oldIdx, i) => {
-    const content = refContentMap.get(oldIdx);
+    let content = refContentMap.get(oldIdx);
     if (content) {
+      // Fallback: If the AI failed to format as a markdown link, auto-link PMID, DOI, or URL
+      if (!content.includes('](') && !content.includes('<a ')) {
+        const pmidMatch = content.match(/(?:PMID|PubMed):\s*(\d+)/i);
+        if (pmidMatch) {
+          content = content.replace(pmidMatch[0], `PMID: [${pmidMatch[1]}](https://pubmed.ncbi.nlm.nih.gov/${pmidMatch[1]}/)`);
+        } else {
+          const doiMatch = content.match(/DOI:\s*(10\.\d{4,9}\/[-._;()/:a-zA-Z0-9]+)/i);
+          if (doiMatch) {
+            content = content.replace(doiMatch[0], `DOI: [${doiMatch[1]}](https://doi.org/${doiMatch[1]})`);
+          } else {
+            const urlMatch = content.match(/(https?:\/\/[^\s]+)/i);
+            if (urlMatch) {
+              content = content.replace(urlMatch[0], `[${urlMatch[0]}](${urlMatch[0]})`);
+            }
+          }
+        }
+      } else {
+        // Fix broken markdown links like [Title](DOI: 10...) or [Title](10...)
+        content = content.replace(/\]\((?:DOI:\s*)?(10\.\d{4,9}\/[-._;()/:a-zA-Z0-9]+)\)/gi, '](https://doi.org/$1)');
+        // Fix broken markdown links like [Title](PMID: 12345) or [Title](PubMed: 12345)
+        content = content.replace(/\]\((?:PMID|PubMed):\s*(\d+)\)/gi, '](https://pubmed.ncbi.nlm.nih.gov/$1/)');
+      }
+      
       const newIdx = i + 1;
-      newRefs.push(`<div id="ref-${newIdx}" class="scroll-mt-24"></div>\n${newIdx}. ${content}`);
+      newRefs.push(`${newIdx}. <span id="ref-${newIdx}" class="scroll-mt-24 inline-block"></span>${content}`);
     }
   });
 
@@ -331,7 +358,7 @@ CRITICAL INSTRUCTIONS:
 1. PATIENT CONTEXT IS ABSOLUTE: You MUST strictly evaluate the new question in the context of the PATIENT DATA provided above. DO NOT give generic answers. If the user asks about a drug, you MUST calculate the maximum dose based on their weight (${patientData.weight} ${patientData.weightUnit || 'kg'}) and adjust it based on their specific pathologies and medication.
 2. LANGUAGE: You MUST generate your response in the SAME LANGUAGE that the user used in their new question.
 3. DRUGBANK LINKS: Every time you mention a drug name, you MUST format it as a Markdown link to its DrugBank entry.
-4. PUBMED REFERENCES: You MUST search PubMed for recent articles (last 5 years, 2021-2026) to corroborate your recommendations. Cite these sources using sequential numbers in brackets (e.g., [1], [2]) starting from [1] in the order they appear.
+4. PUBMED REFERENCES: You MUST search PubMed for recent articles (last 5 years, 2021-2026) to corroborate your recommendations. Cite these sources using sequential numbers in brackets (e.g., [1], [2]) starting from [1] in the order they appear. CRITICAL: In the references list at the end, EVERY SINGLE REFERENCE MUST have its title formatted as a Markdown link pointing EXACTLY to the url provided by the searchPubMed tool (e.g., [Title](https://pubmed.ncbi.nlm.nih.gov/123456/)). DO NOT invent PMIDs. DO NOT leave any reference without a link.
 5. SEQUENTIAL CITATIONS: Your citations MUST be sequentially numbered [1], [2], [3]... in the order they appear in your text. If you cite multiple sources for the same statement, use [1, 2] or [1, 2, 3]. DO NOT use [1][2].
 6. FORMAT: Use a professional, clinical tone. Be direct and concise.
 7. RECENT EVIDENCE: Prioritize evidence from the last 5 years (2021-2026).
@@ -414,7 +441,7 @@ CRITICAL INSTRUCTIONS:
       if (onProgress) onProgress(language === 'en' ? 'Finalizing answer...' : 'Finalizando respuesta...');
       
       const finalResponse = await callGeminiWithRetry({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-3.1-pro-preview',
         contents,
         config: {} // No tools here to force text
       });
@@ -432,7 +459,7 @@ CRITICAL INSTRUCTIONS:
       try {
         console.log('Desperate fallback for follow-up...');
         const fallbackResponse = await callGeminiWithRetry({
-          model: 'gemini-3-flash-preview',
+          model: 'gemini-3.1-pro-preview',
           contents: [{ role: 'user', parts: [{ text: `Responde a esta pregunta del odontólogo basándote en la recomendación previa: ${newQuestion}` }] }]
         });
         finalText = fallbackResponse.text || fallbackResponse.candidates?.[0]?.content?.parts?.find((p: any) => p.text)?.text || '';
@@ -584,10 +611,11 @@ Enumera los cuidados tras el procedimiento y signos de alarma. Sé extremadament
 Genera una lista bibliográfica EXHAUSTIVA en formato Vancouver para TODAS las citas médicas que hayas incluido en el texto anterior. 
 Debes incluir una referencia real y verificable para CADA afirmación clínica, elección de fármaco, ajuste de dosis y contraindicación mencionada. Un caso complejo debe tener al menos 10-15 referencias.
 Asegúrate de que las referencias correspondan exactamente al contexto médico del paciente (por ejemplo, no cites fuentes pediátricas si el paciente es adulto). PRIORIZA REFERENCIAS DE LOS ÚLTIMOS 5 AÑOS (2021-2026).
-INCLUYE SIEMPRE EL DOI (Digital Object Identifier) o el enlace a PubMed en cada referencia bibliográfica.
-Formato de la lista:
-1. Autor(es). Título. Fuente. Año; DOI: ...
-2. Autor(es). Título. Fuente. Año; DOI: ...
+INCLUYE SIEMPRE EL ENLACE DIRECTO A PUBMED en cada referencia bibliográfica.
+CRÍTICO Y OBLIGATORIO: TODAS Y CADA UNA de las referencias bibliográficas DEBEN tener el título del artículo formateado como un enlace Markdown que apunte EXACTAMENTE a la url proporcionada por la herramienta searchPubMed (ej: https://pubmed.ncbi.nlm.nih.gov/123456/). NO inventes PMIDs. NO dejes NINGUNA referencia sin su enlace.
+Formato exacto de la lista:
+1. Autor(es). [Título del artículo](https://pubmed.ncbi.nlm.nih.gov/123456/). Fuente. Año.
+2. Autor(es). [Título del artículo](https://pubmed.ncbi.nlm.nih.gov/654321/). Fuente. Año.
 `;
 
     const steps = language === 'en' 

@@ -93,12 +93,11 @@ export default function ClinicalEngine() {
     setIsAnonymizing(true);
     setUploadError(null);
     try {
-      let combinedText = anonymizedText;
-      for (const file of files) {
+      const results = await Promise.all(files.map(async (file) => {
         const text = await anonymizeAndExtractClinicalData(file);
-        combinedText += `\n\n--- Documento: ${file.name} ---\n${text}`;
-      }
-      setAnonymizedText(combinedText);
+        return `\n\n--- Documento: ${file.name} ---\n${text}`;
+      }));
+      setAnonymizedText(prev => prev + results.join(''));
     } catch (error) {
       console.error('Error processing files:', error);
       setUploadError('Error al procesar y anonimizar los documentos. Por favor, inténtalo de nuevo.');
@@ -240,20 +239,30 @@ export default function ClinicalEngine() {
             <title>Informe Clínico - Novik</title>
             ${document.head.innerHTML}
             <style>
+              @page {
+                size: auto;
+                margin: 20mm;
+              }
               body { 
-                padding: 40px !important; 
+                padding: 0 !important; 
                 background: white !important;
                 margin: 0 !important;
-                overflow: auto !important;
+                overflow: visible !important;
+                height: auto !important;
               }
               #pdf-content {
                 box-shadow: none !important;
                 border: none !important;
                 padding: 0 !important;
+                width: 100% !important;
+                height: auto !important;
+                overflow: visible !important;
               }
               [data-html2canvas-ignore="true"] { display: none !important; }
-              @media print {
-                body { padding: 0 !important; }
+              
+              /* Ensure content can break across pages */
+              .page-break-inside-avoid {
+                break-inside: avoid;
               }
             </style>
           </head>
@@ -266,6 +275,7 @@ export default function ClinicalEngine() {
               window.onload = () => {
                 setTimeout(() => {
                   window.print();
+                  window.close();
                 }, 800);
               };
             </script>
