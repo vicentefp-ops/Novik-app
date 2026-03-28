@@ -19,7 +19,7 @@ const pubmedFunctionDeclaration: FunctionDeclaration = {
   name: "searchPubMed",
   parameters: {
     type: Type.OBJECT,
-    description: "Search PubMed for clinical articles from the last 5 years (2021-2026) and returns titles, authors, source, publication date, DOI, and URLs.",
+    description: "Search PubMed for clinical articles from the last 10 years (2016-2026) and returns titles, authors, source, publication date, DOI, and URLs.",
     properties: {
       query: {
         type: Type.STRING,
@@ -217,16 +217,34 @@ Devuelve ÚNICAMENTE el texto clínico extraído y estructurado, listo para ser 
 };
 
 async function verifyAndFixPubMedLink(content: string): Promise<string> {
-  const linkMatch = content.match(/\[(.*?)\]\((https:\/\/pubmed\.ncbi\.nlm\.nih\.gov\/\d+\/?)\)/);
+  const linkMatch = content.match(/\[(.*?)\]\((https:\/\/pubmed\.ncbi\.nlm\.nih\.gov\/(\d+)\/?)\)/);
   if (linkMatch) {
     const fullText = linkMatch[1];
     const originalUrl = linkMatch[2];
+    const pmid = linkMatch[3];
     
     try {
-      // 1. Try searching with the full text
+      // 1. Verify if the PMID is actually valid using NCBI E-utilities
+      // This bypasses the 10-year restriction in our searchPubMed tool
+      const verifyResponse = await fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${pmid}&retmode=json`);
+      if (verifyResponse.ok) {
+        const verifyData = await verifyResponse.json();
+        if (verifyData.result && verifyData.result[pmid] && !verifyData.result[pmid].error) {
+          // The PMID is valid! Keep the original URL.
+          return content;
+        }
+      }
+    } catch (e) {
+      console.error("Error verifying PMID directly:", e);
+      // If network error, assume it's valid to avoid breaking good links
+      return content;
+    }
+    
+    try {
+      // 2. If PMID is invalid, try searching with the full text
       let searchResult = await searchPubMed(fullText);
       
-      // 2. If not found, try the longest part (usually the title in a citation)
+      // 3. If not found, try the longest part (usually the title in a citation)
       let longestPart = fullText;
       if (!searchResult.results || searchResult.results.length === 0) {
         const parts = fullText.split(/\.\s+/);
@@ -242,7 +260,7 @@ async function verifyAndFixPubMedLink(content: string): Promise<string> {
         const realUrl = searchResult.results[0].url;
         return content.replace(originalUrl, realUrl);
       } else {
-        // 3. If STILL not found, it's likely hallucinated. 
+        // 4. If STILL not found, it's likely hallucinated. 
         // Instead of stripping the link or leaving a broken PMID, 
         // link to a PubMed search for the title so it never 404s and is always helpful.
         const searchUrl = `https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(longestPart)}`;
@@ -454,10 +472,10 @@ CRITICAL INSTRUCTIONS:
 2. NO INTRODUCTORY TEXT: DO NOT echo the prompt instructions. DO NOT include any introductory text or greetings. Start your response directly with the answer.
 3. LANGUAGE: You MUST generate your response in the SAME LANGUAGE that the user used in their new question.
 4. DRUGBANK LINKS: Every time you mention a drug name, you MUST format it as a Markdown link to its DrugBank entry.
-5. PUBMED REFERENCES: You MUST search PubMed for recent articles (last 5 years, 2021-2026) to corroborate your recommendations. Cite these sources using sequential numbers in brackets (e.g., [1], [2]) starting from [1] in the order they appear. CRITICAL: In the references list at the end, EVERY SINGLE REFERENCE MUST have its title formatted as a Markdown link pointing EXACTLY to the url provided by the searchPubMed tool (e.g., [Title](https://pubmed.ncbi.nlm.nih.gov/123456/)). DO NOT invent PMIDs. DO NOT leave any reference without a link.
+5. PUBMED REFERENCES: You MUST search PubMed for recent articles (last 10 years, 2016-2026) to corroborate your recommendations. Cite these sources using sequential numbers in brackets (e.g., [1], [2]) starting from [1] in the order they appear. CRITICAL: In the references list at the end, EVERY SINGLE REFERENCE MUST have its title formatted as a Markdown link pointing EXACTLY to the url provided by the searchPubMed tool (e.g., [Title](https://pubmed.ncbi.nlm.nih.gov/123456/)). DO NOT invent PMIDs. DO NOT leave any reference without a link.
 6. SEQUENTIAL CITATIONS: Your citations MUST be sequentially numbered [1], [2], [3]... in the order they appear in your text. If you cite multiple sources for the same statement, use [1, 2] or [1, 2, 3]. DO NOT use [1][2].
 7. FORMAT: Use a professional, clinical tone. Be direct and concise.
-8. RECENT EVIDENCE: Prioritize evidence from the last 5 years (2021-2026).
+8. RECENT EVIDENCE: Prioritize evidence from the last 10 years (2016-2026).
 9. ALWAYS PROVIDE TEXT: Even if you use tools, you MUST provide a final text response answering the question.
   `;
 
@@ -622,11 +640,11 @@ ${leafletsContext || 'No active leaflets.'}
 3. Prioritize clinical safety.
 4. Be conservative in patients with multiple pathologies, polypharmacy, or high medical risk.
 5. Every recommendation must be justified by patient data and the documentary base.
-6. Hierarchy of sources: 1. Reference clinical knowledge, 2. Provided leaflets, 3. PubMed (MANDATORY: You MUST use the 'searchPubMed' tool to find recent evidence from the last 5 years, 2021-2026, for every case), 4. General knowledge.
+6. Hierarchy of sources: 1. Reference clinical knowledge, 2. Provided leaflets, 3. PubMed (MANDATORY: You MUST use the 'searchPubMed' tool to find recent evidence from the last 10 years, 2016-2026, for every case), 4. General knowledge.
 7. If the patient is allergic to amoxicillin or penicillins, DO NOT propose cephalosporins.
 8. DO NOT explicitly mention the word "protocol" or the title of the provided documents. Integrate the information as your own clinical knowledge and only cite the real medical references (authors, years) found in them.
 9. DO NOT INCLUDE LEAFLETS IN THE BIBLIOGRAPHY: If you use information from the provided leaflets, DO NOT include them in the "References" section. This section must contain only scientific medical literature (articles, guides, books). Information from leaflets is integrated into the text without the need for a numbered citation or simply citing it as "(Leaflet)".
-10. PUBMED USAGE: You MUST perform at least one PubMed search for every clinical case to ensure the latest evidence (last 5 years, 2021-2026) is considered.
+10. PUBMED USAGE: You MUST perform at least one PubMed search for every clinical case to ensure the latest evidence (last 10 years, 2016-2026) is considered.
 
 CRITICAL INSTRUCTIONS: 
 1. LANGUAGE: You MUST generate your response content in English. This applies to all sections and the bibliography.
@@ -637,7 +655,7 @@ CRITICAL INSTRUCTIONS:
 6. DOSE ADJUSTMENT: You MUST strictly calculate and adjust all anesthetic and pharmacological doses according to the patient's specific age (${patientData.age} years), weight (${patientData.weight} ${patientData.weightUnit || 'kg'}), and clinical conditions. Explicitly state the calculated maximum doses and recommended posology based on these parameters.
 7. TABLES: Whenever you propose drugs (Anesthetics, Antibiotics, Analgesics, Anti-inflammatories), you MUST use Markdown tables with the following columns: 'Drug', 'Theoretical Max Dose', 'Recommended Clinical Limit (Adjusted)', 'Justification', 'Interactions'. The 'Recommended Clinical Limit (Adjusted)' MUST be calculated based on the patient's specific age, weight, pathologies, and medication.
 8. INTERACTIONS: In the tables, if a proposed drug has NO interactions with the patient's current medication, leave the cell EMPTY or write "-". NEVER write "No interactions found". NEVER mention interactions for drugs you are not proposing.
-9. PUBMED SEARCH: Use the 'searchPubMed' tool to find recent articles (last 5 years) that support your recommendations.
+9. PUBMED SEARCH: Use the 'searchPubMed' tool to find recent articles (last 10 years) that support your recommendations.
 ` : `
 Actúa como un asistente clínico especializado en odontología médica, farmacología odontológica y valoración de riesgo médico preoperatorio. Tu función es ayudar al odontólogo a tomar decisiones más seguras, prudentes y justificadas, nunca sustituir su criterio clínico.
 
@@ -669,11 +687,11 @@ ${leafletsContext || 'No hay prospectos activos.'}
 3. Prioriza la seguridad clínica.
 4. Sé conservador en pacientes con pluripatología, polimedicación o riesgo médico elevado.
 5. Toda recomendación debe estar justificada por los datos del paciente y la base documental.
-6. Jerarquía de fuentes: 1. Conocimiento clínico de referencia, 2. Prospectos facilitados, 3. PubMed (MANDATORY: You MUST use the 'searchPubMed' tool to find recent evidence from the last 5 years, 2021-2026, for every case), 4. Conocimiento general.
+6. Jerarquía de fuentes: 1. Conocimiento clínico de referencia, 2. Prospectos facilitados, 3. PubMed (MANDATORY: You MUST use the 'searchPubMed' tool to find recent evidence from the last 10 years, 2016-2026, for every case), 4. Conocimiento general.
 7. Si el paciente es alérgico a amoxicilina o penicilinas, NO propongas cefalosporinas.
 8. NO menciones explícitamente la palabra "protocolo" ni el título de los documentos facilitados. Integra la información como tu propio conocimiento clínico y cita únicamente las referencias médicas reales (autores, años) que se encuentren en ellos.
 9. NO INCLUYAS PROSPECTOS EN LA BIBLIOGRAFÍA: Si utilizas información de los prospectos facilitados, NO los incluyas en la sección de "Referencias bibliográficas". Esta sección debe contener únicamente literatura médica científica (artículos, guías, libros). La información de los prospectos se integra en el texto sin necesidad de cita numerada o citándola simplemente como "(Prospecto)".
-10. PUBMED USAGE: You MUST perform at least one PubMed search for every clinical case to ensure the latest evidence (last 5 years, 2021-2026) is considered.
+10. PUBMED USAGE: You MUST perform at least one PubMed search for every clinical case to ensure the latest evidence (last 10 years, 2016-2026) is considered.
 
 CRITICAL INSTRUCTIONS: 
 1. LANGUAGE: You MUST generate your response content in Spanish. This applies to all sections and the bibliography.
@@ -684,7 +702,7 @@ CRITICAL INSTRUCTIONS:
 6. DOSE ADJUSTMENT: You MUST strictly calculate and adjust all anesthetic and pharmacological doses according to the patient's specific age (${patientData.age} years), weight (${patientData.weight} ${patientData.weightUnit || 'kg'}), and clinical conditions. Explicitly state the calculated maximum doses and recommended posology based on these parameters.
 7. TABLAS: Siempre que propongas fármacos (Anestésicos, Antibióticos, Analgésicos, Antiinflamatorios), DEBES usar tablas Markdown con las siguientes columnas: 'Fármaco', 'Dosis Máxima Teórica', 'Límite Clínico Recomendado (Ajustado)', 'Justificación', 'Interacciones'. El 'Límite Clínico Recomendado (Ajustado)' DEBE calcularse de forma conservadora basándose en la edad, peso, patologías y medicación específica del paciente.
 8. INTERACTIONS: In the tables, if a proposed drug has NO interactions with the patient's current medication, leave the cell EMPTY or write "-". NEVER write "No presenta interacciones". NEVER mention interactions for drugs you are not proposing.
-9. PUBMED SEARCH: Use the 'searchPubMed' tool to find recent articles (last 5 years) that support your recommendations.
+9. PUBMED SEARCH: Use the 'searchPubMed' tool to find recent articles (last 10 years) that support your recommendations.
 `;
 
   try {
@@ -713,14 +731,14 @@ Enumera los cuidados tras el procedimiento y signos de alarma. Sé extremadament
 ### ${language === 'en' ? 'References' : 'Referencias bibliográficas'}
 ${language === 'en' ? `Generate an EXHAUSTIVE bibliographic list in Vancouver format for ALL medical citations you have included in the text above. 
 You must include a real and verifiable reference for EACH clinical statement, drug choice, dosage adjustment, and contraindication mentioned. A complex case should have at least 10-15 references.
-Ensure that the references correspond exactly to the patient's medical context (e.g., do not cite pediatric sources if the patient is an adult). PRIORITIZE REFERENCES FROM THE LAST 5 YEARS (2021-2026).
+Ensure that the references correspond exactly to the patient's medical context (e.g., do not cite pediatric sources if the patient is an adult). PRIORITIZE REFERENCES FROM THE LAST 10 YEARS (2016-2026).
 ALWAYS INCLUDE THE DIRECT LINK TO PUBMED in each bibliographic reference.
 CRITICAL AND MANDATORY: YOU MUST CALL THE searchPubMed TOOL FOR EVERY REFERENCE YOU INCLUDE. YOU CANNOT INVENT REFERENCES. EVERY SINGLE bibliographic reference MUST have the article title formatted as a Markdown link pointing EXACTLY to the url provided by the searchPubMed tool (e.g., https://pubmed.ncbi.nlm.nih.gov/123456/). DO NOT invent PMIDs. DO NOT leave ANY reference without its link.
 Exact format of the list:
 1. Author(s). [Article Title](https://pubmed.ncbi.nlm.nih.gov/123456/). Source. Year.
 2. Author(s). [Article Title](https://pubmed.ncbi.nlm.nih.gov/654321/). Source. Year.` : `Genera una lista bibliográfica EXHAUSTIVA en formato Vancouver para TODAS las citas médicas que hayas incluido en el texto anterior. 
 Debes incluir una referencia real y verificable para CADA afirmación clínica, elección de fármaco, ajuste de dosis y contraindicación mencionada. Un caso complejo debe tener al menos 10-15 referencias.
-Asegúrate de que las referencias correspondan exactamente al contexto médico del paciente (por ejemplo, no cites fuentes pediátricas si el paciente es adulto). PRIORIZA REFERENCIAS DE LOS ÚLTIMOS 5 AÑOS (2021-2026).
+Asegúrate de que las referencias correspondan exactamente al contexto médico del paciente (por ejemplo, no cites fuentes pediátricas si el paciente es adulto). PRIORIZA REFERENCIAS DE LOS ÚLTIMOS 10 AÑOS (2016-2026).
 INCLUYE SIEMPRE EL ENLACE DIRECTO A PUBMED en cada referencia bibliográfica.
 CRÍTICO Y OBLIGATORIO: DEBES LLAMAR A LA HERRAMIENTA searchPubMed PARA CADA REFERENCIA QUE INCLUYAS. NO PUEDES INVENTAR REFERENCIAS. TODAS Y CADA UNA de las referencias bibliográficas DEBEN tener el título del artículo formateado como un enlace Markdown que apunte EXACTAMENTE a la url proporcionada por la herramienta searchPubMed (ej: https://pubmed.ncbi.nlm.nih.gov/123456/). NO inventes PMIDs. NO dejes NINGUNA referencia sin su enlace.
 Formato exacto de la lista:

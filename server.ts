@@ -22,9 +22,9 @@ async function startServer() {
       const apiKey = process.env.PUBMED_API_KEY;
       const apiKeyParam = apiKey ? `&api_key=${apiKey}` : '';
 
-      // PubMed E-utilities API - Restrict to last 5 years (2021-2026)
+      // PubMed E-utilities API - Restrict to last 10 years (2016-2026)
       const currentYear = new Date().getFullYear();
-      const startYear = currentYear - 5;
+      const startYear = currentYear - 10;
       const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&mindate=${startYear}&maxdate=${currentYear}&datetype=pdat&retmax=5&retmode=json${apiKeyParam}`;
       const searchResponse = await fetch(searchUrl);
       const searchData = await searchResponse.json();
