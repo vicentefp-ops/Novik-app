@@ -418,13 +418,14 @@ ${newQuestion}
 Responde a la duda del odontólogo de forma directa, concisa, profesional y basada en la evidencia clínica y la seguridad del paciente.
 CRITICAL INSTRUCTIONS: 
 1. PATIENT CONTEXT IS ABSOLUTE: You MUST strictly evaluate the new question in the context of the PATIENT DATA provided above. DO NOT give generic answers. If the user asks about a drug, you MUST calculate the maximum dose based on their weight (${patientData.weight} ${patientData.weightUnit || 'kg'}) and adjust it based on their specific pathologies and medication.
-2. LANGUAGE: You MUST generate your response in the SAME LANGUAGE that the user used in their new question.
-3. DRUGBANK LINKS: Every time you mention a drug name, you MUST format it as a Markdown link to its DrugBank entry.
-4. PUBMED REFERENCES: You MUST search PubMed for recent articles (last 5 years, 2021-2026) to corroborate your recommendations. Cite these sources using sequential numbers in brackets (e.g., [1], [2]) starting from [1] in the order they appear. CRITICAL: In the references list at the end, EVERY SINGLE REFERENCE MUST have its title formatted as a Markdown link pointing EXACTLY to the url provided by the searchPubMed tool (e.g., [Title](https://pubmed.ncbi.nlm.nih.gov/123456/)). DO NOT invent PMIDs. DO NOT leave any reference without a link.
-5. SEQUENTIAL CITATIONS: Your citations MUST be sequentially numbered [1], [2], [3]... in the order they appear in your text. If you cite multiple sources for the same statement, use [1, 2] or [1, 2, 3]. DO NOT use [1][2].
-6. FORMAT: Use a professional, clinical tone. Be direct and concise.
-7. RECENT EVIDENCE: Prioritize evidence from the last 5 years (2021-2026).
-8. ALWAYS PROVIDE TEXT: Even if you use tools, you MUST provide a final text response answering the question.
+2. NO INTRODUCTORY TEXT: DO NOT echo the prompt instructions. DO NOT include any introductory text or greetings. Start your response directly with the answer.
+3. LANGUAGE: You MUST generate your response in the SAME LANGUAGE that the user used in their new question.
+4. DRUGBANK LINKS: Every time you mention a drug name, you MUST format it as a Markdown link to its DrugBank entry.
+5. PUBMED REFERENCES: You MUST search PubMed for recent articles (last 5 years, 2021-2026) to corroborate your recommendations. Cite these sources using sequential numbers in brackets (e.g., [1], [2]) starting from [1] in the order they appear. CRITICAL: In the references list at the end, EVERY SINGLE REFERENCE MUST have its title formatted as a Markdown link pointing EXACTLY to the url provided by the searchPubMed tool (e.g., [Title](https://pubmed.ncbi.nlm.nih.gov/123456/)). DO NOT invent PMIDs. DO NOT leave any reference without a link.
+6. SEQUENTIAL CITATIONS: Your citations MUST be sequentially numbered [1], [2], [3]... in the order they appear in your text. If you cite multiple sources for the same statement, use [1, 2] or [1, 2, 3]. DO NOT use [1][2].
+7. FORMAT: Use a professional, clinical tone. Be direct and concise.
+8. RECENT EVIDENCE: Prioritize evidence from the last 5 years (2021-2026).
+9. ALWAYS PROVIDE TEXT: Even if you use tools, you MUST provide a final text response answering the question.
   `;
 
   try {
@@ -534,6 +535,11 @@ CRITICAL INSTRUCTIONS:
       return language === 'en' ? 'I am sorry, I could not generate a response at this time.' : 'Lo siento, no he podido generar una respuesta en este momento.';
     }
 
+    // Strip any text before the first heading if it exists, or just leave it if no heading
+    // Follow-up questions might not have headings, so we only strip if we find one and it looks like it's echoing
+    // Actually, follow-ups are usually just text, so we don't strictly need to strip by heading.
+    // But we can strip common introductory phrases if needed. Let's just rely on the prompt instruction for now.
+
     // Process citations and references in the follow-up response
     return await processCitationsAndReferences(finalText, language);
   } catch (error) {
@@ -591,13 +597,14 @@ ${leafletsContext || 'No active leaflets.'}
 
 CRITICAL INSTRUCTIONS: 
 1. LANGUAGE: You MUST generate your response content in English. This applies to all sections and the bibliography.
-2. CONCISENESS & FORMAT: Your response MUST be EXTREMELY concise, practical, and schematic. ZERO filler text. DO NOT mention negative findings (e.g., do not say "No interactions"). ONLY mention relevant, existing interactions for the EXACT drugs you are proposing. DO NOT advise against drugs you haven't proposed.
-3. DRUGBANK LINKS: Every time you mention a drug name, you MUST format it as a Markdown link to its DrugBank search page. Use EXACTLY this format: [DrugName](https://go.drugbank.com/search?query=drug+name). Replace spaces with '+' and remove all accents/diacritics in the URL query. Example: [Mefenamic acid](https://go.drugbank.com/search?query=mefenamic+acid). This is CRITICAL for the user to verify drug details.
-4. CITATIONS: You MUST be EXHAUSTIVE with your citations. Cite EVERY clinical recommendation, drug choice, dosage adjustment, and contraindication using numbers in brackets (e.g., [1], [2]). A complex case should have at least 10-15 citations. DO NOT use Author-Year format. Ensure citations are placed IMMEDIATELY after the statement they support, before any punctuation. If you cite multiple sources, use [1, 2] or [1, 2, 3]. DO NOT use [1][2].
-5. DOSE ADJUSTMENT: You MUST strictly calculate and adjust all anesthetic and pharmacological doses according to the patient's specific age (${patientData.age} years), weight (${patientData.weight} ${patientData.weightUnit || 'kg'}), and clinical conditions. Explicitly state the calculated maximum doses and recommended posology based on these parameters.
-6. TABLES: Whenever you propose drugs (Anesthetics, Antibiotics, Analgesics, Anti-inflammatories), you MUST use Markdown tables with the following columns: 'Drug', 'Theoretical Max Dose', 'Recommended Clinical Limit (Adjusted)', 'Justification', 'Interactions'. The 'Recommended Clinical Limit (Adjusted)' MUST be calculated based on the patient's specific age, weight, pathologies, and medication.
-7. INTERACTIONS: In the tables, if a proposed drug has NO interactions with the patient's current medication, leave the cell EMPTY or write "-". NEVER write "No interactions found". NEVER mention interactions for drugs you are not proposing.
-8. PUBMED SEARCH: Use the 'searchPubMed' tool to find recent articles (last 5 years) that support your recommendations.
+2. NO INTRODUCTORY TEXT: DO NOT echo the prompt instructions. DO NOT include any introductory text or greetings. Start your response EXACTLY with the first heading '### Preoperative Precautions'.
+3. CONCISENESS & FORMAT: Your response MUST be EXTREMELY concise, practical, and schematic. ZERO filler text. DO NOT mention negative findings (e.g., do not say "No interactions"). ONLY mention relevant, existing interactions for the EXACT drugs you are proposing. DO NOT advise against drugs you haven't proposed.
+4. DRUGBANK LINKS: Every time you mention a drug name, you MUST format it as a Markdown link to its DrugBank search page. Use EXACTLY this format: [DrugName](https://go.drugbank.com/search?query=drug+name). Replace spaces with '+' and remove all accents/diacritics in the URL query. Example: [Mefenamic acid](https://go.drugbank.com/search?query=mefenamic+acid). This is CRITICAL for the user to verify drug details.
+5. CITATIONS: You MUST be EXHAUSTIVE with your citations. Cite EVERY clinical recommendation, drug choice, dosage adjustment, and contraindication using numbers in brackets (e.g., [1], [2]). A complex case should have at least 10-15 citations. DO NOT use Author-Year format. Ensure citations are placed IMMEDIATELY after the statement they support, before any punctuation. If you cite multiple sources, use [1, 2] or [1, 2, 3]. DO NOT use [1][2].
+6. DOSE ADJUSTMENT: You MUST strictly calculate and adjust all anesthetic and pharmacological doses according to the patient's specific age (${patientData.age} years), weight (${patientData.weight} ${patientData.weightUnit || 'kg'}), and clinical conditions. Explicitly state the calculated maximum doses and recommended posology based on these parameters.
+7. TABLES: Whenever you propose drugs (Anesthetics, Antibiotics, Analgesics, Anti-inflammatories), you MUST use Markdown tables with the following columns: 'Drug', 'Theoretical Max Dose', 'Recommended Clinical Limit (Adjusted)', 'Justification', 'Interactions'. The 'Recommended Clinical Limit (Adjusted)' MUST be calculated based on the patient's specific age, weight, pathologies, and medication.
+8. INTERACTIONS: In the tables, if a proposed drug has NO interactions with the patient's current medication, leave the cell EMPTY or write "-". NEVER write "No interactions found". NEVER mention interactions for drugs you are not proposing.
+9. PUBMED SEARCH: Use the 'searchPubMed' tool to find recent articles (last 5 years) that support your recommendations.
 ` : `
 Actúa como un asistente clínico especializado en odontología médica, farmacología odontológica y valoración de riesgo médico preoperatorio. Tu función es ayudar al odontólogo a tomar decisiones más seguras, prudentes y justificadas, nunca sustituir su criterio clínico.
 
@@ -637,13 +644,14 @@ ${leafletsContext || 'No hay prospectos activos.'}
 
 CRITICAL INSTRUCTIONS: 
 1. LANGUAGE: You MUST generate your response content in Spanish. This applies to all sections and the bibliography.
-2. CONCISENESS & FORMAT: Your response MUST be EXTREMELY concise, practical, and schematic. ZERO filler text. DO NOT mention negative findings (e.g., do not say "No hay interacciones"). ONLY mention relevant, existing interactions for the EXACT drugs you are proposing. DO NOT advise against drugs you haven't proposed.
-3. DRUGBANK LINKS: Every time you mention a drug name, you MUST format it as a Markdown link to its DrugBank search page. Use EXACTLY this format: [DrugName](https://go.drugbank.com/search?query=drug+name). Replace spaces with '+' and remove all accents/diacritics in the URL query. Example: [Ácido mefenámico](https://go.drugbank.com/search?query=acido+mefenamico). This is CRITICAL for the user to verify drug details.
-4. CITATIONS: You MUST be EXHAUSTIVE with your citations. Cite EVERY clinical recommendation, drug choice, dosage adjustment, and contraindication using numbers in brackets (e.g., [1], [2]). A complex case should have at least 10-15 citations. DO NOT use Author-Year format. Ensure citations are placed IMMEDIATELY after the statement they support, before any punctuation. If you cite multiple sources, use [1, 2] or [1, 2, 3]. DO NOT use [1][2].
-5. DOSE ADJUSTMENT: You MUST strictly calculate and adjust all anesthetic and pharmacological doses according to the patient's specific age (${patientData.age} years), weight (${patientData.weight} ${patientData.weightUnit || 'kg'}), and clinical conditions. Explicitly state the calculated maximum doses and recommended posology based on these parameters.
-6. TABLAS: Siempre que propongas fármacos (Anestésicos, Antibióticos, Analgésicos, Antiinflamatorios), DEBES usar tablas Markdown con las siguientes columnas: 'Fármaco', 'Dosis Máxima Teórica', 'Límite Clínico Recomendado (Ajustado)', 'Justificación', 'Interacciones'. El 'Límite Clínico Recomendado (Ajustado)' DEBE calcularse de forma conservadora basándose en la edad, peso, patologías y medicación específica del paciente.
-7. INTERACTIONS: In the tables, if a proposed drug has NO interactions with the patient's current medication, leave the cell EMPTY or write "-". NEVER write "No presenta interacciones". NEVER mention interactions for drugs you are not proposing.
-8. PUBMED SEARCH: Use the 'searchPubMed' tool to find recent articles (last 5 years) that support your recommendations.
+2. NO INTRODUCTORY TEXT: DO NOT echo the prompt instructions. DO NOT include any introductory text or greetings. Start your response EXACTLY with the first heading '### Precauciones preoperatorias'.
+3. CONCISENESS & FORMAT: Your response MUST be EXTREMELY concise, practical, and schematic. ZERO filler text. DO NOT mention negative findings (e.g., do not say "No hay interacciones"). ONLY mention relevant, existing interactions for the EXACT drugs you are proposing. DO NOT advise against drugs you haven't proposed.
+4. DRUGBANK LINKS: Every time you mention a drug name, you MUST format it as a Markdown link to its DrugBank search page. Use EXACTLY this format: [DrugName](https://go.drugbank.com/search?query=drug+name). Replace spaces with '+' and remove all accents/diacritics in the URL query. Example: [Ácido mefenámico](https://go.drugbank.com/search?query=acido+mefenamico). This is CRITICAL for the user to verify drug details.
+5. CITATIONS: You MUST be EXHAUSTIVE with your citations. Cite EVERY clinical recommendation, drug choice, dosage adjustment, and contraindication using numbers in brackets (e.g., [1], [2]). A complex case should have at least 10-15 citations. DO NOT use Author-Year format. Ensure citations are placed IMMEDIATELY after the statement they support, before any punctuation. If you cite multiple sources, use [1, 2] or [1, 2, 3]. DO NOT use [1][2].
+6. DOSE ADJUSTMENT: You MUST strictly calculate and adjust all anesthetic and pharmacological doses according to the patient's specific age (${patientData.age} years), weight (${patientData.weight} ${patientData.weightUnit || 'kg'}), and clinical conditions. Explicitly state the calculated maximum doses and recommended posology based on these parameters.
+7. TABLAS: Siempre que propongas fármacos (Anestésicos, Antibióticos, Analgésicos, Antiinflamatorios), DEBES usar tablas Markdown con las siguientes columnas: 'Fármaco', 'Dosis Máxima Teórica', 'Límite Clínico Recomendado (Ajustado)', 'Justificación', 'Interacciones'. El 'Límite Clínico Recomendado (Ajustado)' DEBE calcularse de forma conservadora basándose en la edad, peso, patologías y medicación específica del paciente.
+8. INTERACTIONS: In the tables, if a proposed drug has NO interactions with the patient's current medication, leave the cell EMPTY or write "-". NEVER write "No presenta interacciones". NEVER mention interactions for drugs you are not proposing.
+9. PUBMED SEARCH: Use the 'searchPubMed' tool to find recent articles (last 5 years) that support your recommendations.
 `;
 
   try {
@@ -868,6 +876,17 @@ Formato exacto de la lista:
 
     if (!finalText) {
       throw new Error(language === 'en' ? 'Gemini returned an empty report.' : 'Gemini devolvió un informe vacío.');
+    }
+
+    // Strip any text before the first heading to prevent echoing the prompt
+    const headingMatch = finalText.match(/(?:^|\n)\s*(###\s+)/);
+    if (headingMatch && headingMatch.index !== undefined) {
+      // If the match starts with a newline, we want to include the newline or just skip it
+      // match.index points to the start of the match (which might be \n)
+      const startIndex = finalText[headingMatch.index] === '\n' ? headingMatch.index + 1 : headingMatch.index;
+      if (startIndex > 0) {
+        finalText = finalText.substring(startIndex).trim();
+      }
     }
 
     // Process citations and references (re-indexing and superscript formatting)
