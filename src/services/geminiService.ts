@@ -219,19 +219,40 @@ Devuelve ÚNICAMENTE el texto clínico extraído y estructurado, listo para ser 
 async function verifyAndFixPubMedLink(content: string): Promise<string> {
   const linkMatch = content.match(/\[(.*?)\]\((https:\/\/pubmed\.ncbi\.nlm\.nih\.gov\/\d+\/?)\)/);
   if (linkMatch) {
-    const title = linkMatch[1];
-    const url = linkMatch[2];
+    const fullText = linkMatch[1];
+    const originalUrl = linkMatch[2];
+    
     try {
-      const searchResult = await searchPubMed(title);
+      // 1. Try searching with the full text
+      let searchResult = await searchPubMed(fullText);
+      
+      // 2. If not found, try the longest part (usually the title in a citation)
+      let longestPart = fullText;
+      if (!searchResult.results || searchResult.results.length === 0) {
+        const parts = fullText.split(/\.\s+/);
+        longestPart = parts.reduce((a, b) => a.length > b.length ? a : b, "");
+        
+        if (longestPart.length > 10) {
+          searchResult = await searchPubMed(longestPart);
+        }
+      }
+      
       if (searchResult.results && searchResult.results.length > 0) {
+        // Found the real article!
         const realUrl = searchResult.results[0].url;
-        return content.replace(url, realUrl);
+        return content.replace(originalUrl, realUrl);
       } else {
-        // If not found, remove the link to avoid broken links
-        return content.replace(`[${title}](${url})`, title);
+        // 3. If STILL not found, it's likely hallucinated. 
+        // Instead of stripping the link or leaving a broken PMID, 
+        // link to a PubMed search for the title so it never 404s and is always helpful.
+        const searchUrl = `https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(longestPart)}`;
+        return content.replace(originalUrl, searchUrl);
       }
     } catch (e) {
       console.error("Failed to verify PubMed link", e);
+      // Fallback to search URL on error to ensure it's a working link
+      const searchUrl = `https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(fullText)}`;
+      return content.replace(originalUrl, searchUrl);
     }
   }
   return content;
@@ -321,6 +342,12 @@ async function processCitationsAndReferences(text: string, language: string): Pr
             const urlMatch = content.match(/(https?:\/\/[^\s]+)/i);
             if (urlMatch) {
               content = content.replace(urlMatch[0], `[${urlMatch[0]}](${urlMatch[0]})`);
+            } else {
+              // If there's absolutely no link, PMID, or DOI, turn the whole text into a PubMed search link
+              const parts = content.split(/\.\s+/);
+              const longestPart = parts.reduce((a, b) => a.length > b.length ? a : b, "");
+              const searchUrl = `https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(longestPart)}`;
+              content = `[${content}](${searchUrl})`;
             }
           }
         }
@@ -359,6 +386,12 @@ async function processCitationsAndReferences(text: string, language: string): Pr
             const urlMatch = content.match(/(https?:\/\/[^\s]+)/i);
             if (urlMatch) {
               content = content.replace(urlMatch[0], `[${urlMatch[0]}](${urlMatch[0]})`);
+            } else {
+              // If there's absolutely no link, PMID, or DOI, turn the whole text into a PubMed search link
+              const parts = content.split(/\.\s+/);
+              const longestPart = parts.reduce((a, b) => a.length > b.length ? a : b, "");
+              const searchUrl = `https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(longestPart)}`;
+              content = `[${content}](${searchUrl})`;
             }
           }
         }
