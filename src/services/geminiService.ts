@@ -755,19 +755,19 @@ Enumera los cuidados tras el procedimiento y signos de alarma. Sé extremadament
 
 ### ${language === 'en' ? 'References' : 'Referencias bibliográficas'}
 ${language === 'en' ? `Generate a bibliographic list in Vancouver format for the most important medical citations you have included in the text above. 
-You must include a real and verifiable reference for the key clinical statements, drug choices, and contraindications mentioned. A complex case should have 3-5 HIGHLY RELEVANT references.
+You must include a real and verifiable reference for the key clinical statements, drug choices, and contraindications mentioned. A complex case should have 5-8 HIGHLY RELEVANT references. MAXIMUM 8 REFERENCES. DO NOT EXCEED 8 REFERENCES UNDER ANY CIRCUMSTANCES.
 Ensure that the references correspond exactly to the patient's medical context (e.g., do not cite pediatric sources if the patient is an adult). PRIORITIZE REFERENCES FROM THE LAST 10 YEARS (2016-2026).
 ALWAYS INCLUDE THE DIRECT LINK TO PUBMED in each bibliographic reference.
-CRITICAL AND MANDATORY: YOU MUST CALL THE searchPubMed TOOL TO FIND THESE REFERENCES. DO NOT INVENT REFERENCES. IT IS BETTER TO HAVE 3 REAL, VERIFIED REFERENCES THAN 10 INVENTED ONES. IF YOU DID NOT FIND IT IN PUBMED USING THE TOOL, DO NOT CITE IT.
+CRITICAL AND MANDATORY: YOU MUST CALL THE searchPubMed TOOL TO FIND THESE REFERENCES. DO NOT INVENT REFERENCES. IT IS BETTER TO HAVE 5 REAL, VERIFIED REFERENCES THAN 20 INVENTED ONES. IF YOU DID NOT FIND IT IN PUBMED USING THE TOOL, DO NOT CITE IT.
 EVERY SINGLE bibliographic reference MUST have the article title formatted as a Markdown link pointing EXACTLY to the url provided by the searchPubMed tool (e.g., https://pubmed.ncbi.nlm.nih.gov/123456/). DO NOT invent PMIDs.
 CRITICAL: DO NOT TRANSLATE THE ARTICLE TITLE. KEEP IT IN ITS ORIGINAL LANGUAGE (ENGLISH).
 Exact format of the list:
 1. Author(s). [Article Title in Original Language](https://pubmed.ncbi.nlm.nih.gov/123456/). Source. Year.
 2. Author(s). [Article Title in Original Language](https://pubmed.ncbi.nlm.nih.gov/654321/). Source. Year.` : `Genera una lista bibliográfica en formato Vancouver para las citas médicas más importantes que hayas incluido en el texto anterior. 
-Debes incluir una referencia real y verificable para las afirmaciones clínicas clave, elecciones de fármacos y contraindicaciones mencionadas. Un caso complejo debe tener 3-5 referencias ALTAMENTE RELEVANTES.
+Debes incluir una referencia real y verificable para las afirmaciones clínicas clave, elecciones de fármacos y contraindicaciones mencionadas. Un caso complejo debe tener 5-8 referencias ALTAMENTE RELEVANTES. MÁXIMO 8 REFERENCIAS. NO SUPERES LAS 8 REFERENCIAS BAJO NINGÚN CONCEPTO.
 Asegúrate de que las referencias correspondan exactamente al contexto médico del paciente (por ejemplo, no cites fuentes pediátricas si el paciente es adulto). PRIORIZA REFERENCIAS DE LOS ÚLTIMOS 10 AÑOS (2016-2026).
 INCLUYE SIEMPRE EL ENLACE DIRECTO A PUBMED en cada referencia bibliográfica.
-CRÍTICO Y OBLIGATORIO: DEBES LLAMAR A LA HERRAMIENTA searchPubMed PARA ENCONTRAR ESTAS REFERENCIAS. NO INVENTES REFERENCIAS. ES MEJOR TENER 3 REFERENCIAS REALES Y VERIFICADAS QUE 10 INVENTADAS. SI NO LO ENCONTRASTE EN PUBMED USANDO LA HERRAMIENTA, NO LO CITES.
+CRÍTICO Y OBLIGATORIO: DEBES LLAMAR A LA HERRAMIENTA searchPubMed PARA ENCONTRAR ESTAS REFERENCIAS. NO INVENTES REFERENCIAS. ES MEJOR TENER 5 REFERENCIAS REALES Y VERIFICADAS QUE 20 INVENTADAS. SI NO LO ENCONTRASTE EN PUBMED USANDO LA HERRAMIENTA, NO LO CITES.
 TODAS Y CADA UNA de las referencias bibliográficas DEBEN tener el título del artículo formateado como un enlace Markdown que apunte EXACTAMENTE a la url proporcionada por la herramienta searchPubMed (ej: https://pubmed.ncbi.nlm.nih.gov/123456/). NO inventes PMIDs.
 CRÍTICO: NO TRADUZCAS EL TÍTULO DEL ARTÍCULO. MANTENLO EN SU IDIOMA ORIGINAL (INGLÉS).
 Formato exacto de la lista:
