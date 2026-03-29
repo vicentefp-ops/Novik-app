@@ -13,7 +13,7 @@ async function startServer() {
 
   // API routes
   app.post("/api/pubmed", async (req, res) => {
-    const { query } = req.body;
+    const { query, verifyOnly } = req.body;
     if (!query) {
       return res.status(400).json({ error: "Query is required" });
     }
@@ -22,10 +22,15 @@ async function startServer() {
       const apiKey = process.env.PUBMED_API_KEY;
       const apiKeyParam = apiKey ? `&api_key=${apiKey}` : '';
 
-      // PubMed E-utilities API - Restrict to last 10 years (2016-2026)
-      const currentYear = new Date().getFullYear();
-      const startYear = currentYear - 10;
-      const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&mindate=${startYear}&maxdate=${currentYear}&datetype=pdat&retmax=5&retmode=json${apiKeyParam}`;
+      let dateParams = '';
+      if (!verifyOnly) {
+        // PubMed E-utilities API - Restrict to last 10 years (2016-2026)
+        const currentYear = new Date().getFullYear();
+        const startYear = currentYear - 10;
+        dateParams = `&mindate=${startYear}&maxdate=${currentYear}&datetype=pdat`;
+      }
+
+      const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}${dateParams}&retmax=5&retmode=json${apiKeyParam}`;
       const searchResponse = await fetch(searchUrl);
       const searchData = await searchResponse.json();
       const idList = searchData.esearchresult?.idlist || [];

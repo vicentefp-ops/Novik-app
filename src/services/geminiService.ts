@@ -217,63 +217,69 @@ Devuelve ÚNICAMENTE el texto clínico extraído y estructurado, listo para ser 
 };
 
 async function verifyAndFixPubMedLink(content: string): Promise<string> {
-  const linkMatch = content.match(/\[(.*?)\]\((https:\/\/pubmed\.ncbi\.nlm\.nih\.gov\/(\d+)\/?)\)/);
-  if (linkMatch) {
-    const fullText = linkMatch[1];
-    const originalUrl = linkMatch[2];
-    const pmid = linkMatch[3];
+  // Match any markdown link that looks like it's pointing to pubmed or ncbi
+  const regex = /\[(.*?)\]\((https?:\/\/[^\)]*(?:pubmed|ncbi\.nlm\.nih\.gov)[^\)]*)\)/g;
+  let match;
+  let newContent = content;
+  
+  const matches = [];
+  while ((match = regex.exec(content)) !== null) {
+    matches.push({
+      fullMatch: match[0],
+      text: match[1],
+      url: match[2]
+    });
+  }
+
+  for (const m of matches) {
+    const linkText = m.text;
+    const originalUrl = m.url;
     
     try {
-      // 1. Verify if the PMID is actually valid using NCBI E-utilities
-      // This bypasses the 10-year restriction in our searchPubMed tool
-      const verifyResponse = await fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${pmid}&retmode=json`);
-      if (verifyResponse.ok) {
-        const verifyData = await verifyResponse.json();
-        if (verifyData.result && verifyData.result[pmid] && !verifyData.result[pmid].error) {
-          // The PMID is valid! Keep the original URL.
-          return content;
+      // 1. Search PubMed for the exact text (usually the title)
+      // Pass verifyOnly: true to bypass date restrictions
+      const response = await fetch('/api/pubmed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: linkText, verifyOnly: true })
+      });
+      const searchData = await response.json();
+
+      if (searchData.results && searchData.results.length > 0) {
+        // Found it! Use the real URL.
+        newContent = newContent.replace(originalUrl, searchData.results[0].url);
+        continue;
+      }
+
+      // 2. If not found, the linkText might contain authors/years. Extract the longest sentence.
+      const parts = linkText.split(/\.\s+/);
+      const longestPart = parts.reduce((a, b) => a.length > b.length ? a : b, "");
+      
+      if (longestPart.length > 10 && longestPart !== linkText) {
+        const response2 = await fetch('/api/pubmed', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: longestPart, verifyOnly: true })
+        });
+        const searchData2 = await response2.json();
+        if (searchData2.results && searchData2.results.length > 0) {
+          newContent = newContent.replace(originalUrl, searchData2.results[0].url);
+          continue;
         }
       }
-    } catch (e) {
-      console.error("Error verifying PMID directly:", e);
-      // If network error, assume it's valid to avoid breaking good links
-      return content;
-    }
-    
-    try {
-      // 2. If PMID is invalid, try searching with the full text
-      let searchResult = await searchPubMed(fullText);
-      
-      // 3. If not found, try the longest part (usually the title in a citation)
-      let longestPart = fullText;
-      if (!searchResult.results || searchResult.results.length === 0) {
-        const parts = fullText.split(/\.\s+/);
-        longestPart = parts.reduce((a, b) => a.length > b.length ? a : b, "");
-        
-        if (longestPart.length > 10) {
-          searchResult = await searchPubMed(longestPart);
-        }
-      }
-      
-      if (searchResult.results && searchResult.results.length > 0) {
-        // Found the real article!
-        const realUrl = searchResult.results[0].url;
-        return content.replace(originalUrl, realUrl);
-      } else {
-        // 4. If STILL not found, it's likely hallucinated. 
-        // Instead of stripping the link or leaving a broken PMID, 
-        // link to a PubMed search for the title so it never 404s and is always helpful.
-        const searchUrl = `https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(longestPart)}`;
-        return content.replace(originalUrl, searchUrl);
-      }
+
+      // 3. If STILL not found, create a fallback search URL using the longest part
+      const searchUrl = `https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(longestPart || linkText)}`;
+      newContent = newContent.replace(originalUrl, searchUrl);
+
     } catch (e) {
       console.error("Failed to verify PubMed link", e);
-      // Fallback to search URL on error to ensure it's a working link
-      const searchUrl = `https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(fullText)}`;
-      return content.replace(originalUrl, searchUrl);
+      const searchUrl = `https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(linkText)}`;
+      newContent = newContent.replace(originalUrl, searchUrl);
     }
   }
-  return content;
+  
+  return newContent;
 }
 
 // Helper to re-index citations and format them as superscripts with commas
