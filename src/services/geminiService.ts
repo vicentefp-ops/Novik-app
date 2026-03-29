@@ -216,7 +216,7 @@ Devuelve ÚNICAMENTE el texto clínico extraído y estructurado, listo para ser 
   }
 };
 
-async function verifyAndFixPubMedLink(content: string): Promise<string> {
+async function verifyAndFixPubMedLink(content: string): Promise<string | null> {
   // Match any markdown link that looks like it's pointing to pubmed or ncbi
   const regex = /\[(.*?)\]\((https?:\/\/[^\)]*(?:pubmed|ncbi\.nlm\.nih\.gov)[^\)]*)\)/g;
   let match;
@@ -230,6 +230,9 @@ async function verifyAndFixPubMedLink(content: string): Promise<string> {
       url: match[2]
     });
   }
+
+  // If there are no pubmed links to verify, we assume it's valid (or it was already processed)
+  if (matches.length === 0) return newContent;
 
   for (const m of matches) {
     const linkText = m.text;
@@ -250,7 +253,7 @@ async function verifyAndFixPubMedLink(content: string): Promise<string> {
         }
       } catch (e) {
         console.error("Error verifying PMID directly:", e);
-        continue; // Keep original on network error
+        // On network error, we can't be sure. Let's try searching.
       }
     }
     
@@ -287,14 +290,13 @@ async function verifyAndFixPubMedLink(content: string): Promise<string> {
         }
       }
 
-      // 4. If STILL not found, create a fallback search URL using the longest part
-      const searchUrl = `https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(longestPart || linkText)}`;
-      newContent = newContent.replace(originalUrl, searchUrl);
+      // 4. If STILL not found, the reference is hallucinated. Return null.
+      console.warn(`Reference hallucinated and removed: ${linkText}`);
+      return null;
 
     } catch (e) {
       console.error("Failed to verify PubMed link", e);
-      const searchUrl = `https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(linkText)}`;
-      newContent = newContent.replace(originalUrl, searchUrl);
+      return null;
     }
   }
   
@@ -322,38 +324,7 @@ async function processCitationsAndReferences(text: string, language: string): Pr
   let mainText = parts[0];
   const refsText = parts.slice(1).join('### References');
 
-  // 1. Find all citations in main text in order of appearance
-  const citationRegex = /\[([\d,\s]+)\]/g;
-  const citationsInOrder: number[] = [];
-  let match;
-  while ((match = citationRegex.exec(mainText)) !== null) {
-    const nums = match[1].split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
-    nums.forEach(n => {
-      if (!citationsInOrder.includes(n)) {
-        citationsInOrder.push(n);
-      }
-    });
-  }
-
-  // 2. Map old indices to new sequential indices (1, 2, 3...)
-  const indexMap = new Map<number, number>();
-  citationsInOrder.forEach((oldIdx, i) => {
-    indexMap.set(oldIdx, i + 1);
-  });
-
-  // 3. Replace citations in main text with new indices and format as <sup>[1](#ref-1), [2](#ref-2)</sup>
-  mainText = mainText.replace(/\[([\d,\s]+)\]/g, (match, p1) => {
-    const nums = p1.split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
-    if (nums.length === 0) return match;
-    
-    const links = nums.map(oldIdx => {
-      const newIdx = indexMap.get(oldIdx) || oldIdx;
-      return `[${newIdx}](#ref-${newIdx})`;
-    });
-    return `<sup>${links.join(', ')}</sup>`;
-  });
-
-  // 4. Rebuild references list with new indices and in the order they appear
+  // 1. Rebuild references list and VERIFY them first
   const refLines = refsText.split('\n');
   const refContentMap = new Map<number, string>();
   let currentRefIdx = -1;
@@ -367,86 +338,110 @@ async function processCitationsAndReferences(text: string, language: string): Pr
     }
   });
 
+  // Verify all references and remove invalid ones
+  const validOldIndices = new Set<number>();
+  for (const [oldIdx, contentVal] of refContentMap.entries()) {
+    let content = contentVal;
+    
+    // Fallback: If the AI failed to format as a markdown link, auto-link PMID, DOI, or URL
+    if (!content.includes('](') && !content.includes('<a ')) {
+      const pmidMatch = content.match(/(?:PMID|PubMed)\s*:?\s*(\d+)/i);
+      if (pmidMatch) {
+        content = content.replace(pmidMatch[0], `PMID: [${pmidMatch[1]}](https://pubmed.ncbi.nlm.nih.gov/${pmidMatch[1]}/)`);
+      } else {
+        const doiMatch = content.match(/DOI:\s*(10\.\d{4,9}\/[-._;()/:a-zA-Z0-9]+)/i);
+        if (doiMatch) {
+          content = content.replace(doiMatch[0], `DOI: [${doiMatch[1]}](https://doi.org/${doiMatch[1]})`);
+        } else {
+          const urlMatch = content.match(/(https?:\/\/[^\s]+)/i);
+          if (urlMatch) {
+            content = content.replace(urlMatch[0], `[${urlMatch[0]}](${urlMatch[0]})`);
+          } else {
+            // If there's absolutely no link, PMID, or DOI, turn the whole text into a PubMed search link
+            const parts = content.split(/\.\s+/);
+            const longestPart = parts.reduce((a, b) => a.length > b.length ? a : b, "");
+            const searchUrl = `https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(longestPart)}`;
+            content = `[${content}](${searchUrl})`;
+          }
+        }
+      }
+    } else {
+      // Fix broken markdown links like [Title](DOI: 10...) or [Title](10...)
+      content = content.replace(/\]\((?:DOI:\s*)?(10\.\d{4,9}\/[-._;()/:a-zA-Z0-9]+)\)/gi, '](https://doi.org/$1)');
+      
+      // Fix broken markdown links like [Title](PMID: 12345), [Title](PubMed 12345), [Title](123456)
+      content = content.replace(/\]\((?:(?:PMID|PubMed)\s*:?\s*)?(\d{6,9})\)/gi, '](https://pubmed.ncbi.nlm.nih.gov/$1/)');
+      
+      // Fix broken markdown links like [Title](www.pubmed.ncbi.nlm.nih.gov/123456)
+      content = content.replace(/\]\((?:https?:\/\/)?(?:www\.)?pubmed\.ncbi\.nlm\.nih\.gov\/(\d+)\/?\)/gi, '](https://pubmed.ncbi.nlm.nih.gov/$1/)');
+    }
+    
+    // Verify PubMed link. If it returns null, the reference is hallucinated and should be dropped.
+    const verifiedContent = await verifyAndFixPubMedLink(content);
+    if (verifiedContent !== null) {
+      refContentMap.set(oldIdx, verifiedContent);
+      validOldIndices.add(oldIdx);
+    } else {
+      refContentMap.delete(oldIdx);
+    }
+  }
+
+  // 2. Find all citations in main text in order of appearance
+  const citationRegex = /\[([\d,\s]+)\]/g;
+  const citationsInOrder: number[] = [];
+  let match;
+  while ((match = citationRegex.exec(mainText)) !== null) {
+    const nums = match[1].split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
+    nums.forEach(n => {
+      // ONLY add to citationsInOrder if it's a VALID reference!
+      if (validOldIndices.has(n) && !citationsInOrder.includes(n)) {
+        citationsInOrder.push(n);
+      }
+    });
+  }
+
+  // Enforce maximum 8 references
+  if (citationsInOrder.length > 8) {
+    citationsInOrder.splice(8);
+  }
+
+  // 3. Map old indices to new sequential indices (1, 2, 3...)
+  const indexMap = new Map<number, number>();
+  citationsInOrder.forEach((oldIdx, i) => {
+    indexMap.set(oldIdx, i + 1);
+  });
+
+  // 4. Replace citations in main text with new indices and format as <sup>[1](#ref-1), [2](#ref-2)</sup>
+  mainText = mainText.replace(/\[([\d,\s]+)\]/g, (match, p1) => {
+    const nums = p1.split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
+    if (nums.length === 0) return match;
+    
+    const links = nums.map(oldIdx => {
+      const newIdx = indexMap.get(oldIdx);
+      if (newIdx === undefined) return null; // It was invalid or exceeded the limit of 8
+      return `[${newIdx}](#ref-${newIdx})`;
+    }).filter(link => link !== null);
+
+    if (links.length === 0) return ''; // Remove the citation entirely if all were invalid
+    return `<sup>${links.join(', ')}</sup>`;
+  });
+
+  // 5. Rebuild references list with new indices and in the order they appear
   const newRefs: string[] = [];
   for (let i = 0; i < citationsInOrder.length; i++) {
     const oldIdx = citationsInOrder[i];
-    let content = refContentMap.get(oldIdx);
+    const content = refContentMap.get(oldIdx);
     if (content) {
-      // Fallback: If the AI failed to format as a markdown link, auto-link PMID, DOI, or URL
-      if (!content.includes('](') && !content.includes('<a ')) {
-        const pmidMatch = content.match(/(?:PMID|PubMed)\s*:?\s*(\d+)/i);
-        if (pmidMatch) {
-          content = content.replace(pmidMatch[0], `PMID: [${pmidMatch[1]}](https://pubmed.ncbi.nlm.nih.gov/${pmidMatch[1]}/)`);
-        } else {
-          const doiMatch = content.match(/DOI:\s*(10\.\d{4,9}\/[-._;()/:a-zA-Z0-9]+)/i);
-          if (doiMatch) {
-            content = content.replace(doiMatch[0], `DOI: [${doiMatch[1]}](https://doi.org/${doiMatch[1]})`);
-          } else {
-            const urlMatch = content.match(/(https?:\/\/[^\s]+)/i);
-            if (urlMatch) {
-              content = content.replace(urlMatch[0], `[${urlMatch[0]}](${urlMatch[0]})`);
-            } else {
-              // If there's absolutely no link, PMID, or DOI, turn the whole text into a PubMed search link
-              const parts = content.split(/\.\s+/);
-              const longestPart = parts.reduce((a, b) => a.length > b.length ? a : b, "");
-              const searchUrl = `https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(longestPart)}`;
-              content = `[${content}](${searchUrl})`;
-            }
-          }
-        }
-      } else {
-        // Fix broken markdown links like [Title](DOI: 10...) or [Title](10...)
-        content = content.replace(/\]\((?:DOI:\s*)?(10\.\d{4,9}\/[-._;()/:a-zA-Z0-9]+)\)/gi, '](https://doi.org/$1)');
-        
-        // Fix broken markdown links like [Title](PMID: 12345), [Title](PubMed 12345), [Title](123456)
-        content = content.replace(/\]\((?:(?:PMID|PubMed)\s*:?\s*)?(\d{6,9})\)/gi, '](https://pubmed.ncbi.nlm.nih.gov/$1/)');
-        
-        // Fix broken markdown links like [Title](www.pubmed.ncbi.nlm.nih.gov/123456)
-        content = content.replace(/\]\((?:https?:\/\/)?(?:www\.)?pubmed\.ncbi\.nlm\.nih\.gov\/(\d+)\/?\)/gi, '](https://pubmed.ncbi.nlm.nih.gov/$1/)');
-      }
-      
-      // Verify PubMed link
-      content = await verifyAndFixPubMedLink(content);
-      
       const newIdx = i + 1;
       newRefs.push(`${newIdx}. <span id="ref-${newIdx}" class="scroll-mt-24 inline-block"></span> ${content}`);
     }
   }
 
-  // Add any remaining references that were not cited in the text
-  for (const [oldIdx, contentVal] of refContentMap.entries()) {
-    let content = contentVal;
+  // Add any remaining valid references that were not cited in the text (up to the limit of 8 total)
+  for (const [oldIdx, content] of refContentMap.entries()) {
+    if (newRefs.length >= 8) break; // Enforce maximum 8 references
+    
     if (!citationsInOrder.includes(oldIdx)) {
-      if (!content.includes('](') && !content.includes('<a ')) {
-        const pmidMatch = content.match(/(?:PMID|PubMed)\s*:?\s*(\d+)/i);
-        if (pmidMatch) {
-          content = content.replace(pmidMatch[0], `PMID: [${pmidMatch[1]}](https://pubmed.ncbi.nlm.nih.gov/${pmidMatch[1]}/)`);
-        } else {
-          const doiMatch = content.match(/DOI:\s*(10\.\d{4,9}\/[-._;()/:a-zA-Z0-9]+)/i);
-          if (doiMatch) {
-            content = content.replace(doiMatch[0], `DOI: [${doiMatch[1]}](https://doi.org/${doiMatch[1]})`);
-          } else {
-            const urlMatch = content.match(/(https?:\/\/[^\s]+)/i);
-            if (urlMatch) {
-              content = content.replace(urlMatch[0], `[${urlMatch[0]}](${urlMatch[0]})`);
-            } else {
-              // If there's absolutely no link, PMID, or DOI, turn the whole text into a PubMed search link
-              const parts = content.split(/\.\s+/);
-              const longestPart = parts.reduce((a, b) => a.length > b.length ? a : b, "");
-              const searchUrl = `https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(longestPart)}`;
-              content = `[${content}](${searchUrl})`;
-            }
-          }
-        }
-      } else {
-        content = content.replace(/\]\((?:DOI:\s*)?(10\.\d{4,9}\/[-._;()/:a-zA-Z0-9]+)\)/gi, '](https://doi.org/$1)');
-        content = content.replace(/\]\((?:(?:PMID|PubMed)\s*:?\s*)?(\d{6,9})\)/gi, '](https://pubmed.ncbi.nlm.nih.gov/$1/)');
-        content = content.replace(/\]\((?:https?:\/\/)?(?:www\.)?pubmed\.ncbi\.nlm\.nih\.gov\/(\d+)\/?\)/gi, '](https://pubmed.ncbi.nlm.nih.gov/$1/)');
-      }
-      
-      // Verify PubMed link
-      content = await verifyAndFixPubMedLink(content);
-      
       const newIdx = newRefs.length + 1;
       newRefs.push(`${newIdx}. <span id="ref-${newIdx}" class="scroll-mt-24 inline-block"></span> ${content}`);
     }
