@@ -6,12 +6,10 @@ import { collection, getDocs, query, where, addDoc, serverTimestamp } from 'fire
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
-import { Stethoscope, Activity, AlertCircle, FileText, Pill, ChevronRight, Loader2, Paperclip, CheckCircle2, MessageSquare, Send, Download, PlusCircle } from 'lucide-react';
+import { Stethoscope, Activity, AlertCircle, FileText, Pill, ChevronRight, Loader2, Paperclip, CheckCircle2, MessageSquare, Send, PlusCircle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
-import { jsPDF } from 'jspdf';
-import html2canvas from 'html2canvas';
 import clsx from 'clsx';
 
 export default function ClinicalEngine() {
@@ -38,7 +36,6 @@ export default function ClinicalEngine() {
   const [currentPatientData, setCurrentPatientData] = useState<PatientData | null>(null);
   const [progressStatus, setProgressStatus] = useState<string>('');
   const [progress, setProgress] = useState(10);
-  const [isExporting, setIsExporting] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -215,78 +212,6 @@ export default function ClinicalEngine() {
     setCurrentPatientData(null);
     setAnonymizedText('');
     setQuestion('');
-  };
-
-  const exportToPDF = () => {
-    const isIframe = window.self !== window.top;
-    
-    if (isIframe) {
-      // En iframes (como la vista previa), window.print() puede estar bloqueado.
-      // Abrimos una nueva pestaña con el contenido a imprimir.
-      const printWindow = window.open('', '_blank');
-      if (!printWindow) {
-        alert('Por favor, permite las ventanas emergentes para exportar el PDF.');
-        return;
-      }
-      
-      const element = document.getElementById('pdf-content');
-      if (!element) return;
-
-      printWindow.document.write(`
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <title>Informe Clínico - Novik</title>
-            ${document.head.innerHTML}
-            <style>
-              @page {
-                size: auto;
-                margin: 20mm;
-              }
-              body { 
-                padding: 0 !important; 
-                background: white !important;
-                margin: 0 !important;
-                overflow: visible !important;
-                height: auto !important;
-              }
-              #pdf-content {
-                box-shadow: none !important;
-                border: none !important;
-                padding: 0 !important;
-                width: 100% !important;
-                height: auto !important;
-                overflow: visible !important;
-              }
-              [data-html2canvas-ignore="true"] { display: none !important; }
-              
-              /* Ensure content can break across pages */
-              .page-break-inside-avoid {
-                break-inside: avoid;
-              }
-            </style>
-          </head>
-          <body>
-            <div id="pdf-content" class="bg-white">
-              ${element.innerHTML}
-            </div>
-            <script>
-              // Esperar a que carguen las fuentes e imágenes
-              window.onload = () => {
-                setTimeout(() => {
-                  window.print();
-                  window.close();
-                }, 800);
-              };
-            </script>
-          </body>
-        </html>
-      `);
-      printWindow.document.close();
-    } else {
-      // Si no estamos en un iframe, usamos la impresión nativa directamente
-      window.print();
-    }
   };
 
   const renderResultSections = () => {
@@ -579,14 +504,6 @@ export default function ClinicalEngine() {
                 </h2>
                 <div className="flex gap-3">
                   <button 
-                    onClick={exportToPDF} 
-                    disabled={isExporting}
-                    className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 disabled:opacity-50 transition-colors text-sm font-medium shadow-sm"
-                  >
-                    {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                    {isExporting ? t('exportingPDF') : t('exportPDF')}
-                  </button>
-                  <button 
                     onClick={handleNewConsultation} 
                     className="flex items-center gap-2 px-4 py-2 bg-olive-50 text-olive-700 border border-olive-100 rounded-lg hover:bg-olive-100 transition-colors text-sm font-medium shadow-sm"
                   >
@@ -706,14 +623,6 @@ export default function ClinicalEngine() {
 
               {/* Bottom Action Buttons */}
               <div className="flex justify-end gap-3 mt-2">
-                <button 
-                  onClick={exportToPDF} 
-                  disabled={isExporting}
-                  className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 disabled:opacity-50 transition-colors text-sm font-medium shadow-sm"
-                >
-                  {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                  {isExporting ? t('exportingPDF') : t('exportPDF')}
-                </button>
                 <button 
                   onClick={handleNewConsultation} 
                   className="flex items-center gap-2 px-4 py-2 bg-olive-50 text-olive-700 border border-olive-100 rounded-lg hover:bg-olive-100 transition-colors text-sm font-medium shadow-sm"

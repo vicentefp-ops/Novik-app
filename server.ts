@@ -30,8 +30,30 @@ async function startServer() {
         dateParams = `&mindate=${startYear}&maxdate=${currentYear}&datetype=pdat`;
       }
 
+      const fetchWithRetry = async (url: string, retries = 3, delay = 1000) => {
+        for (let i = 0; i < retries; i++) {
+          // Add a small delay to respect PubMed rate limits (3 requests per second without API key)
+          if (!apiKey) {
+            await new Promise(resolve => setTimeout(resolve, 350));
+          }
+          
+          const response = await fetch(url);
+          if (response.ok) {
+            return response;
+          }
+          if (response.status === 429) {
+            console.warn(`Rate limited by PubMed. Retrying in ${delay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            delay *= 2; // Exponential backoff
+            continue;
+          }
+          throw new Error(`PubMed API error: ${response.status} ${response.statusText}`);
+        }
+        throw new Error('Max retries reached for PubMed API');
+      };
+
       const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}${dateParams}&retmax=5&retmode=json${apiKeyParam}`;
-      const searchResponse = await fetch(searchUrl);
+      const searchResponse = await fetchWithRetry(searchUrl);
       const searchData = await searchResponse.json();
       const idList = searchData.esearchresult?.idlist || [];
 
@@ -40,7 +62,7 @@ async function startServer() {
       }
 
       const fetchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${idList.join(',')}&retmode=json${apiKeyParam}`;
-      const fetchResponse = await fetch(fetchUrl);
+      const fetchResponse = await fetchWithRetry(fetchUrl);
       const fetchData = await fetchResponse.json();
 
       const results = idList.map((id: string) => {

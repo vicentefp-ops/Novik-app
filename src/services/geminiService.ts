@@ -216,89 +216,91 @@ Devuelve ÚNICAMENTE el texto clínico extraído y estructurado, listo para ser 
   }
 };
 
-async function verifyAndFixPubMedLink(content: string): Promise<string> {
-  // Match any markdown link that looks like it's pointing to pubmed or ncbi
-  const regex = /\[(.*?)\]\((https?:\/\/[^\)]*(?:pubmed|ncbi\.nlm\.nih\.gov)[^\)]*)\)/g;
-  let match;
-  let newContent = content;
+async function verifyAndFixPubMedLink(content: string): Promise<string | null> {
+  // Extract the title or main text from the reference
+  let searchText = content;
   
-  const matches = [];
-  while ((match = regex.exec(content)) !== null) {
-    matches.push({
-      fullMatch: match[0],
-      text: match[1],
-      url: match[2]
-    });
+  // If it's a markdown link, extract the text part
+  const mdLinkRegex = /\[(.*?)\]\((.*?)\)/;
+  const mdMatch = content.match(mdLinkRegex);
+  let originalUrl = "";
+  
+  if (mdMatch) {
+    searchText = mdMatch[1];
+    originalUrl = mdMatch[2];
   }
 
-  for (const m of matches) {
-    const linkText = m.text;
-    const originalUrl = m.url;
-    
-    // 1. Try to extract PMID and verify it directly
-    const pmidMatch = originalUrl.match(/(?:pubmed\.ncbi\.nlm\.nih\.gov\/|pubmed\/)(\d+)/i);
-    if (pmidMatch) {
-      const pmid = pmidMatch[1];
-      try {
-        const verifyResponse = await fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${pmid}&retmode=json`);
-        if (verifyResponse.ok) {
-          const verifyData = await verifyResponse.json();
-          if (verifyData.result && verifyData.result[pmid] && !verifyData.result[pmid].error) {
-            // The PMID is valid! Keep the original URL.
-            continue;
+  // 1. If it already has a valid PMID, verify it directly
+  const pmidMatch = content.match(/(?:pubmed\.ncbi\.nlm\.nih\.gov\/|pubmed\/|PMID:\s*)(\d+)/i);
+  if (pmidMatch) {
+    const pmid = pmidMatch[1];
+    try {
+      const verifyResponse = await fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${pmid}&retmode=json`);
+      if (verifyResponse.ok) {
+        const verifyData = await verifyResponse.json();
+        if (verifyData.result && verifyData.result[pmid] && !verifyData.result[pmid].error) {
+          // Valid PMID!
+          // Ensure it's formatted as a proper PubMed link
+          if (mdMatch) {
+             return content.replace(originalUrl, `https://pubmed.ncbi.nlm.nih.gov/${pmid}/`);
+          } else {
+             return `[${content}](https://pubmed.ncbi.nlm.nih.gov/${pmid}/)`;
           }
         }
-      } catch (e) {
-        console.error("Error verifying PMID directly:", e);
-        continue; // Keep original on network error
       }
-    }
-    
-    // 2. If we reach here, PMID is invalid or missing. Try searching by text.
-    try {
-      // Pass verifyOnly: true to bypass date restrictions
-      const response = await fetch('/api/pubmed', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: linkText, verifyOnly: true })
-      });
-      const searchData = await response.json();
-
-      if (searchData.results && searchData.results.length > 0) {
-        // Found it! Use the real URL.
-        newContent = newContent.replace(originalUrl, searchData.results[0].url);
-        continue;
-      }
-
-      // 3. If not found, the linkText might contain authors/years. Extract the longest sentence.
-      const parts = linkText.split(/\.\s+/);
-      const longestPart = parts.reduce((a, b) => a.length > b.length ? a : b, "");
-      
-      if (longestPart.length > 10 && longestPart !== linkText) {
-        const response2 = await fetch('/api/pubmed', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: longestPart, verifyOnly: true })
-        });
-        const searchData2 = await response2.json();
-        if (searchData2.results && searchData2.results.length > 0) {
-          newContent = newContent.replace(originalUrl, searchData2.results[0].url);
-          continue;
-        }
-      }
-
-      // 4. If STILL not found, create a fallback search URL using the longest part
-      const searchUrl = `https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(longestPart || linkText)}`;
-      newContent = newContent.replace(originalUrl, searchUrl);
-
     } catch (e) {
-      console.error("Failed to verify PubMed link", e);
-      const searchUrl = `https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(linkText)}`;
-      newContent = newContent.replace(originalUrl, searchUrl);
+      console.error("Error verifying PMID directly:", e);
+      // Fallback to search
     }
   }
-  
-  return newContent;
+
+  // 2. Search PubMed by text
+  try {
+    const response = await fetch('/api/pubmed', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: searchText, verifyOnly: true })
+    });
+    const searchData = await response.json();
+
+    if (searchData.results && searchData.results.length > 0) {
+      const realUrl = searchData.results[0].url;
+      if (mdMatch) {
+        return content.replace(originalUrl, realUrl);
+      } else {
+        return `[${content}](${realUrl})`;
+      }
+    }
+
+    // 3. Try longest sentence
+    const parts = searchText.split(/\.\s+/);
+    const longestPart = parts.reduce((a, b) => a.length > b.length ? a : b, "");
+    
+    if (longestPart.length > 10 && longestPart !== searchText) {
+      const response2 = await fetch('/api/pubmed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: longestPart, verifyOnly: true })
+      });
+      const searchData2 = await response2.json();
+      if (searchData2.results && searchData2.results.length > 0) {
+        const realUrl = searchData2.results[0].url;
+        if (mdMatch) {
+          return content.replace(originalUrl, realUrl);
+        } else {
+          return `[${content}](${realUrl})`;
+        }
+      }
+    }
+
+    // 4. Not found in PubMed. Hallucinated!
+    console.warn(`Reference hallucinated and removed: ${searchText}`);
+    return null;
+
+  } catch (e) {
+    console.error("Failed to verify PubMed link", e);
+    return null;
+  }
 }
 
 // Helper to re-index citations and format them as superscripts with commas
@@ -307,7 +309,7 @@ async function processCitationsAndReferences(text: string, language: string): Pr
   // This ensures they are wrapped in a single <sup> tag later
   let processedText = text.replace(/\]\s*[,;]?\s*\[/g, ', ');
 
-  const refSectionRegex = /###\s+(?:References|Referencias bibliográficas|Bibliografía|Fuentes|BIBLIOGRAFÍA)/i;
+  const refSectionRegex = /(?:^|\n)(?:#{1,6}\s*|\*\*\s*|\*\s*|__\s*|_\s*)?(?:\d+\.\s*)?(?:References|Referencias bibliogr[áa]ficas|Referencias|Bibliograf[íi]a|Fuentes|Literatura|Art[íi]culos)(?:\s+recomendadas|\s+consultadas|\s+m[ée]dicas)?\s*(?:\(.*\))?\s*(?:\*\*|\*|__|_)?\s*(?::)?\s*\n+/i;
   const parts = processedText.split(refSectionRegex);
   
   if (parts.length < 2) {
@@ -322,43 +324,12 @@ async function processCitationsAndReferences(text: string, language: string): Pr
   let mainText = parts[0];
   const refsText = parts.slice(1).join('### References');
 
-  // 1. Find all citations in main text in order of appearance
-  const citationRegex = /\[([\d,\s]+)\]/g;
-  const citationsInOrder: number[] = [];
-  let match;
-  while ((match = citationRegex.exec(mainText)) !== null) {
-    const nums = match[1].split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
-    nums.forEach(n => {
-      if (!citationsInOrder.includes(n)) {
-        citationsInOrder.push(n);
-      }
-    });
-  }
-
-  // 2. Map old indices to new sequential indices (1, 2, 3...)
-  const indexMap = new Map<number, number>();
-  citationsInOrder.forEach((oldIdx, i) => {
-    indexMap.set(oldIdx, i + 1);
-  });
-
-  // 3. Replace citations in main text with new indices and format as <sup>[1](#ref-1), [2](#ref-2)</sup>
-  mainText = mainText.replace(/\[([\d,\s]+)\]/g, (match, p1) => {
-    const nums = p1.split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
-    if (nums.length === 0) return match;
-    
-    const links = nums.map(oldIdx => {
-      const newIdx = indexMap.get(oldIdx) || oldIdx;
-      return `[${newIdx}](#ref-${newIdx})`;
-    });
-    return `<sup>${links.join(', ')}</sup>`;
-  });
-
-  // 4. Rebuild references list with new indices and in the order they appear
+  // 1. Rebuild references list and VERIFY them first
   const refLines = refsText.split('\n');
   const refContentMap = new Map<number, string>();
   let currentRefIdx = -1;
   refLines.forEach(line => {
-    const m = line.match(/^\[?(\d+)\]?[\.\)\-]?\s+(.*)/);
+    const m = line.match(/^(?:-\s*|\*\s*)?\[?(\d+)\]?[\.\)\-]?\s+(.*)/);
     if (m) {
       currentRefIdx = parseInt(m[1]);
       refContentMap.set(currentRefIdx, m[2]);
@@ -367,86 +338,110 @@ async function processCitationsAndReferences(text: string, language: string): Pr
     }
   });
 
+  // Verify all references and remove invalid ones
+  const validOldIndices = new Set<number>();
+  for (const [oldIdx, contentVal] of refContentMap.entries()) {
+    let content = contentVal;
+    
+    // Fallback: If the AI failed to format as a markdown link, auto-link PMID, DOI, or URL
+    if (!content.includes('](') && !content.includes('<a ')) {
+      const pmidMatch = content.match(/(?:PMID|PubMed)\s*:?\s*(\d+)/i);
+      if (pmidMatch) {
+        content = content.replace(pmidMatch[0], `PMID: [${pmidMatch[1]}](https://pubmed.ncbi.nlm.nih.gov/${pmidMatch[1]}/)`);
+      } else {
+        const doiMatch = content.match(/DOI:\s*(10\.\d{4,9}\/[-._;()/:a-zA-Z0-9]+)/i);
+        if (doiMatch) {
+          content = content.replace(doiMatch[0], `DOI: [${doiMatch[1]}](https://doi.org/${doiMatch[1]})`);
+        } else {
+          const urlMatch = content.match(/(https?:\/\/[^\s]+)/i);
+          if (urlMatch) {
+            content = content.replace(urlMatch[0], `[${urlMatch[0]}](${urlMatch[0]})`);
+          } else {
+            // If there's absolutely no link, PMID, or DOI, turn the whole text into a PubMed search link
+            const parts = content.split(/\.\s+/);
+            const longestPart = parts.reduce((a, b) => a.length > b.length ? a : b, "");
+            const searchUrl = `https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(longestPart)}`;
+            content = `[${content}](${searchUrl})`;
+          }
+        }
+      }
+    } else {
+      // Fix broken markdown links like [Title](DOI: 10...) or [Title](10...)
+      content = content.replace(/\]\((?:DOI:\s*)?(10\.\d{4,9}\/[-._;()/:a-zA-Z0-9]+)\)/gi, '](https://doi.org/$1)');
+      
+      // Fix broken markdown links like [Title](PMID: 12345), [Title](PubMed 12345), [Title](123456)
+      content = content.replace(/\]\((?:(?:PMID|PubMed)\s*:?\s*)?(\d{6,9})\)/gi, '](https://pubmed.ncbi.nlm.nih.gov/$1/)');
+      
+      // Fix broken markdown links like [Title](www.pubmed.ncbi.nlm.nih.gov/123456)
+      content = content.replace(/\]\((?:https?:\/\/)?(?:www\.)?pubmed\.ncbi\.nlm\.nih\.gov\/(\d+)\/?\)/gi, '](https://pubmed.ncbi.nlm.nih.gov/$1/)');
+    }
+    
+    // Verify PubMed link. If it returns null, the reference is hallucinated and should be dropped.
+    const verifiedContent = await verifyAndFixPubMedLink(content);
+    if (verifiedContent !== null) {
+      refContentMap.set(oldIdx, verifiedContent);
+      validOldIndices.add(oldIdx);
+    } else {
+      refContentMap.delete(oldIdx);
+    }
+  }
+
+  // 2. Find all citations in main text in order of appearance
+  const citationRegex = /\[([\d,\s]+)\]/g;
+  const citationsInOrder: number[] = [];
+  let match;
+  while ((match = citationRegex.exec(mainText)) !== null) {
+    const nums = match[1].split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
+    nums.forEach(n => {
+      // ONLY add to citationsInOrder if it's a VALID reference!
+      if (validOldIndices.has(n) && !citationsInOrder.includes(n)) {
+        citationsInOrder.push(n);
+      }
+    });
+  }
+
+  // Enforce maximum 5 references
+  if (citationsInOrder.length > 5) {
+    citationsInOrder.splice(5);
+  }
+
+  // 3. Map old indices to new sequential indices (1, 2, 3...)
+  const indexMap = new Map<number, number>();
+  citationsInOrder.forEach((oldIdx, i) => {
+    indexMap.set(oldIdx, i + 1);
+  });
+
+  // 4. Replace citations in main text with new indices and format as <sup>[1](#ref-1), [2](#ref-2)</sup>
+  mainText = mainText.replace(/\[([\d,\s]+)\]/g, (match, p1) => {
+    const nums = p1.split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
+    if (nums.length === 0) return match;
+    
+    const links = nums.map(oldIdx => {
+      const newIdx = indexMap.get(oldIdx);
+      if (newIdx === undefined) return null; // It was invalid or exceeded the limit of 8
+      return `[${newIdx}](#ref-${newIdx})`;
+    }).filter(link => link !== null);
+
+    if (links.length === 0) return ''; // Remove the citation entirely if all were invalid
+    return `<sup>${links.join(', ')}</sup>`;
+  });
+
+  // 5. Rebuild references list with new indices and in the order they appear
   const newRefs: string[] = [];
   for (let i = 0; i < citationsInOrder.length; i++) {
     const oldIdx = citationsInOrder[i];
-    let content = refContentMap.get(oldIdx);
+    const content = refContentMap.get(oldIdx);
     if (content) {
-      // Fallback: If the AI failed to format as a markdown link, auto-link PMID, DOI, or URL
-      if (!content.includes('](') && !content.includes('<a ')) {
-        const pmidMatch = content.match(/(?:PMID|PubMed)\s*:?\s*(\d+)/i);
-        if (pmidMatch) {
-          content = content.replace(pmidMatch[0], `PMID: [${pmidMatch[1]}](https://pubmed.ncbi.nlm.nih.gov/${pmidMatch[1]}/)`);
-        } else {
-          const doiMatch = content.match(/DOI:\s*(10\.\d{4,9}\/[-._;()/:a-zA-Z0-9]+)/i);
-          if (doiMatch) {
-            content = content.replace(doiMatch[0], `DOI: [${doiMatch[1]}](https://doi.org/${doiMatch[1]})`);
-          } else {
-            const urlMatch = content.match(/(https?:\/\/[^\s]+)/i);
-            if (urlMatch) {
-              content = content.replace(urlMatch[0], `[${urlMatch[0]}](${urlMatch[0]})`);
-            } else {
-              // If there's absolutely no link, PMID, or DOI, turn the whole text into a PubMed search link
-              const parts = content.split(/\.\s+/);
-              const longestPart = parts.reduce((a, b) => a.length > b.length ? a : b, "");
-              const searchUrl = `https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(longestPart)}`;
-              content = `[${content}](${searchUrl})`;
-            }
-          }
-        }
-      } else {
-        // Fix broken markdown links like [Title](DOI: 10...) or [Title](10...)
-        content = content.replace(/\]\((?:DOI:\s*)?(10\.\d{4,9}\/[-._;()/:a-zA-Z0-9]+)\)/gi, '](https://doi.org/$1)');
-        
-        // Fix broken markdown links like [Title](PMID: 12345), [Title](PubMed 12345), [Title](123456)
-        content = content.replace(/\]\((?:(?:PMID|PubMed)\s*:?\s*)?(\d{6,9})\)/gi, '](https://pubmed.ncbi.nlm.nih.gov/$1/)');
-        
-        // Fix broken markdown links like [Title](www.pubmed.ncbi.nlm.nih.gov/123456)
-        content = content.replace(/\]\((?:https?:\/\/)?(?:www\.)?pubmed\.ncbi\.nlm\.nih\.gov\/(\d+)\/?\)/gi, '](https://pubmed.ncbi.nlm.nih.gov/$1/)');
-      }
-      
-      // Verify PubMed link
-      content = await verifyAndFixPubMedLink(content);
-      
       const newIdx = i + 1;
       newRefs.push(`${newIdx}. <span id="ref-${newIdx}" class="scroll-mt-24 inline-block"></span> ${content}`);
     }
   }
 
-  // Add any remaining references that were not cited in the text
-  for (const [oldIdx, contentVal] of refContentMap.entries()) {
-    let content = contentVal;
+  // Add any remaining valid references that were not cited in the text (up to the limit of 5 total)
+  for (const [oldIdx, content] of refContentMap.entries()) {
+    if (newRefs.length >= 5) break; // Enforce maximum 5 references
+    
     if (!citationsInOrder.includes(oldIdx)) {
-      if (!content.includes('](') && !content.includes('<a ')) {
-        const pmidMatch = content.match(/(?:PMID|PubMed)\s*:?\s*(\d+)/i);
-        if (pmidMatch) {
-          content = content.replace(pmidMatch[0], `PMID: [${pmidMatch[1]}](https://pubmed.ncbi.nlm.nih.gov/${pmidMatch[1]}/)`);
-        } else {
-          const doiMatch = content.match(/DOI:\s*(10\.\d{4,9}\/[-._;()/:a-zA-Z0-9]+)/i);
-          if (doiMatch) {
-            content = content.replace(doiMatch[0], `DOI: [${doiMatch[1]}](https://doi.org/${doiMatch[1]})`);
-          } else {
-            const urlMatch = content.match(/(https?:\/\/[^\s]+)/i);
-            if (urlMatch) {
-              content = content.replace(urlMatch[0], `[${urlMatch[0]}](${urlMatch[0]})`);
-            } else {
-              // If there's absolutely no link, PMID, or DOI, turn the whole text into a PubMed search link
-              const parts = content.split(/\.\s+/);
-              const longestPart = parts.reduce((a, b) => a.length > b.length ? a : b, "");
-              const searchUrl = `https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(longestPart)}`;
-              content = `[${content}](${searchUrl})`;
-            }
-          }
-        }
-      } else {
-        content = content.replace(/\]\((?:DOI:\s*)?(10\.\d{4,9}\/[-._;()/:a-zA-Z0-9]+)\)/gi, '](https://doi.org/$1)');
-        content = content.replace(/\]\((?:(?:PMID|PubMed)\s*:?\s*)?(\d{6,9})\)/gi, '](https://pubmed.ncbi.nlm.nih.gov/$1/)');
-        content = content.replace(/\]\((?:https?:\/\/)?(?:www\.)?pubmed\.ncbi\.nlm\.nih\.gov\/(\d+)\/?\)/gi, '](https://pubmed.ncbi.nlm.nih.gov/$1/)');
-      }
-      
-      // Verify PubMed link
-      content = await verifyAndFixPubMedLink(content);
-      
       const newIdx = newRefs.length + 1;
       newRefs.push(`${newIdx}. <span id="ref-${newIdx}" class="scroll-mt-24 inline-block"></span> ${content}`);
     }
@@ -676,7 +671,7 @@ CRITICAL INSTRUCTIONS:
 2. NO INTRODUCTORY TEXT: DO NOT echo the prompt instructions. DO NOT include any introductory text or greetings. Start your response EXACTLY with the first heading '### Preoperative Precautions'.
 3. CONCISENESS & FORMAT: Your response MUST be EXTREMELY concise, practical, and schematic. ZERO filler text. DO NOT mention negative findings (e.g., do not say "No interactions"). ONLY mention relevant, existing interactions for the EXACT drugs you are proposing. DO NOT advise against drugs you haven't proposed.
 4. DRUGBANK LINKS: Every time you mention a drug name, you MUST format it as a Markdown link to its DrugBank search page. Use EXACTLY this format: [DrugName](https://go.drugbank.com/search?query=drug+name). Replace spaces with '+' and remove all accents/diacritics in the URL query. Example: [Mefenamic acid](https://go.drugbank.com/search?query=mefenamic+acid). This is CRITICAL for the user to verify drug details.
-5. CITATIONS: You MUST cite the most important clinical recommendations, drug choices, dosage adjustments, and contraindications using numbers in brackets (e.g., [1], [2]). A complex case should have 3-5 HIGHLY RELEVANT citations. DO NOT use Author-Year format. Ensure citations are placed IMMEDIATELY after the statement they support, before any punctuation. If you cite multiple sources, use [1, 2] or [1, 2, 3]. DO NOT use [1][2].
+5. CITATIONS: You MUST cite the most important clinical recommendations, drug choices, dosage adjustments, and contraindications using numbers in brackets (e.g., [1], [2]). A complex case should have 3-5 HIGHLY RELEVANT citations. DO NOT use Author-Year format. Ensure citations are placed IMMEDIATELY after the statement they support, before any punctuation. If you cite multiple sources, use [1, 2] or [1, 2, 3]. DO NOT use [1][2]. CRITICAL: DO NOT INVENT REFERENCES. If you need more references to reach the 3-5 quota, perform MULTIPLE distinct searches using the 'searchPubMed' tool. EVERY reference must be real and verified.
 6. DOSE ADJUSTMENT: You MUST strictly calculate and adjust all anesthetic and pharmacological doses according to the patient's specific age (${patientData.age} years), weight (${patientData.weight} ${patientData.weightUnit || 'kg'}), and clinical conditions. Explicitly state the calculated maximum doses and recommended posology based on these parameters.
 7. TABLES: Whenever you propose drugs (Anesthetics, Antibiotics, Analgesics, Anti-inflammatories), you MUST use Markdown tables with the following columns: 'Drug', 'Theoretical Max Dose', 'Recommended Clinical Limit (Adjusted)', 'Justification', 'Interactions'. The 'Recommended Clinical Limit (Adjusted)' MUST be calculated based on the patient's specific age, weight, pathologies, and medication.
 8. INTERACTIONS: In the tables, if a proposed drug has NO interactions with the patient's current medication, leave the cell EMPTY or write "-". NEVER write "No interactions found". NEVER mention interactions for drugs you are not proposing.
@@ -723,7 +718,7 @@ CRITICAL INSTRUCTIONS:
 2. NO INTRODUCTORY TEXT: DO NOT echo the prompt instructions. DO NOT include any introductory text or greetings. Start your response EXACTLY with the first heading '### Precauciones preoperatorias'.
 3. CONCISENESS & FORMAT: Your response MUST be EXTREMELY concise, practical, and schematic. ZERO filler text. DO NOT mention negative findings (e.g., do not say "No hay interacciones"). ONLY mention relevant, existing interactions for the EXACT drugs you are proposing. DO NOT advise against drugs you haven't proposed.
 4. DRUGBANK LINKS: Every time you mention a drug name, you MUST format it as a Markdown link to its DrugBank search page. Use EXACTLY this format: [DrugName](https://go.drugbank.com/search?query=drug+name). Replace spaces with '+' and remove all accents/diacritics in the URL query. Example: [Ácido mefenámico](https://go.drugbank.com/search?query=acido+mefenamico). This is CRITICAL for the user to verify drug details.
-5. CITATIONS: You MUST cite the most important clinical recommendations, drug choices, dosage adjustments, and contraindications using numbers in brackets (e.g., [1], [2]). A complex case should have 3-5 HIGHLY RELEVANT citations. DO NOT use Author-Year format. Ensure citations are placed IMMEDIATELY after the statement they support, before any punctuation. If you cite multiple sources, use [1, 2] or [1, 2, 3]. DO NOT use [1][2].
+5. CITATIONS: You MUST cite the most important clinical recommendations, drug choices, dosage adjustments, and contraindications using numbers in brackets (e.g., [1], [2]). A complex case should have 3-5 HIGHLY RELEVANT citations. DO NOT use Author-Year format. Ensure citations are placed IMMEDIATELY after the statement they support, before any punctuation. If you cite multiple sources, use [1, 2] or [1, 2, 3]. DO NOT use [1][2]. CRITICAL: DO NOT INVENT REFERENCES. If you need more references to reach the 3-5 quota, perform MULTIPLE distinct searches using the 'searchPubMed' tool. EVERY reference must be real and verified.
 6. DOSE ADJUSTMENT: You MUST strictly calculate and adjust all anesthetic and pharmacological doses according to the patient's specific age (${patientData.age} years), weight (${patientData.weight} ${patientData.weightUnit || 'kg'}), and clinical conditions. Explicitly state the calculated maximum doses and recommended posology based on these parameters.
 7. TABLAS: Siempre que propongas fármacos (Anestésicos, Antibióticos, Analgésicos, Antiinflamatorios), DEBES usar tablas Markdown con las siguientes columnas: 'Fármaco', 'Dosis Máxima Teórica', 'Límite Clínico Recomendado (Ajustado)', 'Justificación', 'Interacciones'. El 'Límite Clínico Recomendado (Ajustado)' DEBE calcularse de forma conservadora basándose en la edad, peso, patologías y medicación específica del paciente.
 8. INTERACTIONS: In the tables, if a proposed drug has NO interactions with the patient's current medication, leave the cell EMPTY or write "-". NEVER write "No presenta interacciones". NEVER mention interactions for drugs you are not proposing.
@@ -755,7 +750,7 @@ Enumera los cuidados tras el procedimiento y signos de alarma. Sé extremadament
 
 ### ${language === 'en' ? 'References' : 'Referencias bibliográficas'}
 ${language === 'en' ? `Generate a bibliographic list in Vancouver format for the most important medical citations you have included in the text above. 
-You must include a real and verifiable reference for the key clinical statements, drug choices, and contraindications mentioned. A complex case should have 3-5 HIGHLY RELEVANT references.
+You must include a real and verifiable reference for the key clinical statements, drug choices, and contraindications mentioned. A complex case should have 3-5 HIGHLY RELEVANT references. MAXIMUM 5 REFERENCES. DO NOT EXCEED 5 REFERENCES UNDER ANY CIRCUMSTANCES.
 Ensure that the references correspond exactly to the patient's medical context (e.g., do not cite pediatric sources if the patient is an adult). PRIORITIZE REFERENCES FROM THE LAST 10 YEARS (2016-2026).
 ALWAYS INCLUDE THE DIRECT LINK TO PUBMED in each bibliographic reference.
 CRITICAL AND MANDATORY: YOU MUST CALL THE searchPubMed TOOL TO FIND THESE REFERENCES. DO NOT INVENT REFERENCES. IT IS BETTER TO HAVE 3 REAL, VERIFIED REFERENCES THAN 10 INVENTED ONES. IF YOU DID NOT FIND IT IN PUBMED USING THE TOOL, DO NOT CITE IT.
@@ -764,7 +759,7 @@ CRITICAL: DO NOT TRANSLATE THE ARTICLE TITLE. KEEP IT IN ITS ORIGINAL LANGUAGE (
 Exact format of the list:
 1. Author(s). [Article Title in Original Language](https://pubmed.ncbi.nlm.nih.gov/123456/). Source. Year.
 2. Author(s). [Article Title in Original Language](https://pubmed.ncbi.nlm.nih.gov/654321/). Source. Year.` : `Genera una lista bibliográfica en formato Vancouver para las citas médicas más importantes que hayas incluido en el texto anterior. 
-Debes incluir una referencia real y verificable para las afirmaciones clínicas clave, elecciones de fármacos y contraindicaciones mencionadas. Un caso complejo debe tener 3-5 referencias ALTAMENTE RELEVANTES.
+Debes incluir una referencia real y verificable para las afirmaciones clínicas clave, elecciones de fármacos y contraindicaciones mencionadas. Un caso complejo debe tener 3-5 referencias ALTAMENTE RELEVANTES. MÁXIMO 5 REFERENCIAS. NO SUPERES LAS 5 REFERENCIAS BAJO NINGÚN CONCEPTO.
 Asegúrate de que las referencias correspondan exactamente al contexto médico del paciente (por ejemplo, no cites fuentes pediátricas si el paciente es adulto). PRIORIZA REFERENCIAS DE LOS ÚLTIMOS 10 AÑOS (2016-2026).
 INCLUYE SIEMPRE EL ENLACE DIRECTO A PUBMED en cada referencia bibliográfica.
 CRÍTICO Y OBLIGATORIO: DEBES LLAMAR A LA HERRAMIENTA searchPubMed PARA ENCONTRAR ESTAS REFERENCIAS. NO INVENTES REFERENCIAS. ES MEJOR TENER 3 REFERENCIAS REALES Y VERIFICADAS QUE 10 INVENTADAS. SI NO LO ENCONTRASTE EN PUBMED USANDO LA HERRAMIENTA, NO LO CITES.
