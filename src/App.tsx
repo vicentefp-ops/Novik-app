@@ -60,6 +60,7 @@ export default function App() {
               <Route path="admin/users" element={<ProtectedRoute requireAdmin><AdminUsers /></ProtectedRoute>} />
               <Route path="admin/banners" element={<ProtectedRoute requireAdmin><AdminBanners /></ProtectedRoute>} />
             </Route>
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Router>
       </LanguageProvider>

@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Allow: /login
+Allow: /legal-notice
+Allow: /terms-of-use
+Allow: /privacy-policy
+Disallow: /admin/
+Disallow: /settings/
+Disallow: /onboarding
+Sitemap: https://novik.ai/sitemap.xml

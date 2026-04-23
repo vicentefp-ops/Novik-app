@@ -1,5 +1,5 @@
 {
   "name": "Novik",
-  "description": "",
+  "description": "Asistente clínico inteligente para odontología especializada en farmacología y decisiones clínicas seguras.",
   "requestFramePermissions": ["microphone"]
 }
